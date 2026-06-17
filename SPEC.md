@@ -53,6 +53,8 @@ These were settled during scoping and drive the design below.
 | Config & updates | **Hardcoded credentials** in a gitignored header; **USB reflash** for changes |
 | Outage behavior | **Reconnect & drop gaps** — no on-device buffering in v1 |
 | Firmware toolchain | **PlatformIO** |
+| Ingest service language | **Python** (also the language of the `server/` mock publisher) |
+| Website language | **Go** — single static binary, low footprint on the Pi (explicitly not Python) |
 | Public hosting | **Already set up** (port-forward + DDNS + reverse proxy); web app only needs to bind a local port on the Pi |
 
 ---
@@ -275,10 +277,13 @@ SparkFun Qwiic soil sensor, PubSubClient (or `arduino-mqtt`), ArduinoJson.
 
 Lighter sketch; to be detailed when Phase 1 lands.
 
-- **Broker:** Mosquitto on the Pi (auth + ACLs; optionally TLS on the LAN).
-- **Ingest service:** subscribes to `wtwlt/station/+/readings` and `.../lightning`,
-  validates against the schema, and writes to the local DB. Tracks last-seen per
-  station for staleness/alerting.
+- **Broker:** Mosquitto on the Pi (auth + ACLs; optionally TLS on the LAN). A
+  local dev broker config + a mock publisher (faithful to §3.3) already exist in
+  `server/` for exercising the publish path without hardware.
+- **Ingest service (Python):** subscribes to `wtwlt/station/+/readings` and
+  `.../lightning`, validates against the schema, and writes to the local DB.
+  Tracks last-seen per station for staleness/alerting. (The mock publisher in
+  `server/` is already Python; the ingest service stays Python too.)
 - **Database:** **TBD — decide in Phase 2.** This workload is small and gentle:
   ~1 write/min (~1,440 rows/day, ~525k rows/year) plus occasional lightning
   events, with reads split between "latest reading" and historical rollups —
@@ -318,8 +323,10 @@ Lighter sketch; to be detailed when Phase 1 lands.
 - **History:** charts over day/week/month/year with downsampled rollups;
   daily rain totals; min/max/avg summaries.
 - **Units:** metric/imperial **toggle** (stored metric, converted for display).
-- Stack TBD (e.g. a small API + a JS frontend, or a server-rendered app);
-  decide in Phase 3.
+- **Language: Go.** The public website/API is built in **Go** (not Python) — a
+  single static binary is a great fit for the resource-constrained Pi (low memory,
+  trivial deployment, fast). Frontend approach (server-rendered Go templates +
+  light JS, vs. a JS framework hitting a Go JSON API) is TBD, but the server is Go.
 
 ---
 

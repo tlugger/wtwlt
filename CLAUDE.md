@@ -69,6 +69,9 @@ don't batch it up for later:**
 
 ## Future-phase notes (not yet built)
 
+- **Languages are fixed:** the MQTT **ingest service is Python** (matching the
+  `server/` mock publisher); the **public website/API is Go** (single static
+  binary, low footprint on the Pi — explicitly not a Python web app).
 - **Database is undecided** — see the comparison in `SPEC.md §4` (SQLite is the
   pragmatic lean; RRDtool/DuckDB/VictoriaMetrics are contenders). Optimize for a
   resource-limited Pi: low RAM, SD-card write wear (favor WAL/batched writes).

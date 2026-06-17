@@ -3,6 +3,7 @@
 # Future phases will add their own modules here (e.g. `mod server`, `mod web`).
 
 mod firmware
+mod server
 
 # List available recipes and modules
 default:

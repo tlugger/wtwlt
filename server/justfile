@@ -1,0 +1,29 @@
+# Server / broker tasks (Phase 2 — Raspberry Pi side).
+# Invoke from the repo root as `just server <recipe>`, or from server/ as `just <recipe>`.
+set shell := ["bash", "-uc"]
+
+# System python for the venv (the Homebrew python is broken on this machine).
+py := "/usr/bin/python3"
+
+# Show available recipes
+default:
+    @just --list
+
+# One-time: create the Python venv and install deps (paho-mqtt)
+setup:
+    cd {{source_directory()}} && {{py}} -m venv .venv && .venv/bin/pip install -q --upgrade pip -r requirements.txt && echo "server venv ready (run: just server mock)"
+
+# Start the local Mosquitto broker in the foreground (Ctrl-C to stop).
+# Requires: brew install mosquitto
+broker:
+    cd {{source_directory()}} && mkdir -p data && mosquitto -c mosquitto/mosquitto.conf
+
+# Subscribe to all station topics (run in a second terminal).
+# Requires: brew install mosquitto
+watch:
+    mosquitto_sub -h localhost -t 'wtwlt/#' -v
+
+# Run the mock weather-station publisher (Ctrl-C to stop).
+# Pass extra args after the recipe, e.g.  just server mock --interval 60
+mock *args:
+    cd {{source_directory()}} && .venv/bin/python mock_publisher.py {{args}}
