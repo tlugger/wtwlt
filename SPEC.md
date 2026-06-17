@@ -1,0 +1,321 @@
+# wtwlt — What's The Weather Like Today
+
+A self-hosted home weather station. An outdoor, solar-powered ESP32 sensor node
+publishes readings over WiFi to a Raspberry Pi, which logs them to a local
+database and serves a publicly accessible website showing current conditions and
+historical trends.
+
+This repo is a **monorepo** containing every part of the system: firmware, the
+Pi-side server, and the web frontend.
+
+- **Status:** Phase 1 (firmware) in active design.
+- **Last updated:** 2026-06-16
+
+---
+
+## 1. System Overview
+
+```
+┌─────────────────────────┐         MQTT/WiFi         ┌──────────────────────────────┐
+│  Weather Station Node    │ ───────────────────────▶ │  Raspberry Pi                  │
+│  ESP32 + SparkFun        │   (Mosquitto broker on    │                                │
+│  MicroMod Weather        │    the Pi)                │  • Mosquitto broker            │
+│  Carrier Board           │                           │  • Ingest service → local DB   │
+│                          │                           │  • Web app on a local port     │
+│  Solar + battery, always │                           │    (public exposure already    │
+│  awake, publishes 1×/min │                           │     handled by existing        │
+│                          │                           │     port-forward + DDNS +       │
+│                          │                           │     reverse proxy)             │
+└─────────────────────────┘                           └──────────────────────────────┘
+```
+
+**Data flow:** Sensors → ESP32 samples @1 Hz → aggregates over 60 s → publishes
+one JSON message per minute (plus event-driven lightning messages) to MQTT → Pi
+ingest service persists to the local DB → web app reads the DB and renders
+current + historical views.
+
+---
+
+## 2. Decisions Locked In
+
+These were settled during scoping and drive the design below.
+
+| Area | Decision |
+|------|----------|
+| Sensor node MCU | ESP32 on a **SparkFun MicroMod Weather Carrier Board** |
+| Weather-meter driver | **SparkFun_Weather_Meter_Kit_Arduino_Library** (`SFEWeatherMeterKit`) |
+| Cloud services | **None.** No Arduino IoT Cloud / no vendor cloud — collect locally and publish via MQTT only |
+| Transport | **MQTT over WiFi**; Mosquitto broker runs on the Pi |
+| Power & placement | **Outdoor, solar + battery**, **continuously awake** (no deep sleep) |
+| Cadence | Sample **@1 Hz**, publish **aggregated every 60 s** |
+| Sensors (v1) | Temp, humidity, pressure (BME280); **UV index** (VEML6075); **lightning** (AS3935); wind speed + direction + rain (Weather Meter Kit); soil moisture (Qwiic) |
+| Units on the wire | **Metric / SI**; website displays both (metric/imperial toggle) |
+| Config & updates | **Hardcoded credentials** in a gitignored header; **USB reflash** for changes |
+| Outage behavior | **Reconnect & drop gaps** — no on-device buffering in v1 |
+| Firmware toolchain | **PlatformIO** |
+| Public hosting | **Already set up** (port-forward + DDNS + reverse proxy); web app only needs to bind a local port on the Pi |
+
+---
+
+## 3. Phase 1 — Weather Station Firmware (current focus)
+
+### 3.1 Hardware
+
+- **ESP32** (MicroMod form factor) seated on the **SparkFun MicroMod Weather
+  Carrier Board**.
+- Onboard sensors used in v1:
+  - **BME280** — temperature, relative humidity, barometric pressure (I²C).
+  - **VEML6075** — UV-A / UV-B → UV index (I²C).
+  - **AS3935** — lightning detection (strike/disturber/noise, distance estimate;
+    interrupt-driven).
+- **SparkFun Weather Meter Kit** (via the carrier's screw terminals / RJ11),
+  driven by the **`SFEWeatherMeterKit`** library, which owns the interrupt
+  handlers and the vane decode (see §3.4):
+  - **Anemometer** — reed-switch pulse; library converts via `kphPerCountPerSec`
+    (default **2.4 km/h** per count/sec). `getWindSpeed()` → km/h.
+  - **Wind vane** — analog resistive divider on ADC; library maps to **16
+    bearings** via the `vaneADCValues[]` table. `getWindDirection()` → degrees.
+  - **Rain gauge** — tipping bucket reed switch; library accumulates via
+    `mmPerRainfallCount` (default **0.2794 mm/tip**). `getTotalRainfall()` → mm.
+- **Soil moisture sensor** on the **Qwiic** bus (I²C). v1 reports moisture only
+  (no soil temperature).
+- **Power:** solar panel + LiPo battery with a charge controller. The node runs
+  **continuously awake** — sized so the panel/battery survive cloudy stretches.
+  Battery voltage is reported in diagnostics so we can monitor the power budget
+  in the field.
+
+> Wind and rain are pulse-counted with interrupts. Because the node never
+> deep-sleeps, every gust and bucket tip is captured for true per-minute averages
+> and accurate rain accumulation.
+
+### 3.2 Sampling & aggregation
+
+- Internal sample loop runs at **1 Hz**.
+- A **60 s aggregation window** produces one published "readings" message:
+  - **Wind speed:** sample `getWindSpeed()` each second; report the window
+    average **and** the peak 1 s reading (gust).
+  - **Wind direction:** sample `getWindDirection()` each second and
+    vector-average the bearing over the window (so it doesn't flip across the
+    0°/360° boundary), plus a cardinal label.
+  - **Rain:** read `getTotalRainfall()` (a monotonic accumulator); publish the
+    delta over the window. The Pi keeps running daily/period totals. (Avoid
+    `resetTotalRainfall()` on the node so a missed message doesn't lose rain.)
+  - **Temp / humidity / pressure / UV / soil moisture:** instantaneous read at
+    publish time (or windowed mean — TBD, see open questions).
+- **Lightning** is **event-driven**, not windowed: each AS3935 interrupt is
+  classified and, if it's a real strike, published immediately on its own topic.
+
+### 3.3 MQTT contract
+
+Broker: Mosquitto on the Pi. Suggested QoS 1 for readings/lightning, retained
+LWT for status.
+
+**Topics**
+
+| Topic | Purpose | Cadence |
+|-------|---------|---------|
+| `wtwlt/station/<station_id>/readings` | Aggregated sensor readings | every 60 s |
+| `wtwlt/station/<station_id>/lightning` | Lightning strike events | on event |
+| `wtwlt/station/<station_id>/status` | Online/offline + identity (LWT, retained) | on connect / disconnect |
+
+**`readings` payload (metric on the wire):**
+
+```json
+{
+  "station_id": "wtwlt-01",
+  "ts": "2026-06-16T12:00:00Z",
+  "interval_s": 60,
+  "temp_c": 21.4,
+  "humidity_pct": 58.2,
+  "pressure_hpa": 1013.2,
+  "uv_index": 3.1,
+  "wind": {
+    "avg_mps": 2.4,
+    "gust_mps": 5.1,
+    "dir_deg": 270,
+    "dir_cardinal": "W"
+  },
+  "rain_mm": 0.5,
+  "soil_moisture_pct": 42.0,
+  "diagnostics": {
+    "battery_v": 3.92,
+    "rssi_dbm": -67,
+    "uptime_s": 38211,
+    "fw_version": "1.0.0"
+  }
+}
+```
+
+**`lightning` payload:**
+
+```json
+{
+  "station_id": "wtwlt-01",
+  "ts": "2026-06-16T12:00:03Z",
+  "event": "strike",
+  "distance_km": 12,
+  "energy": 158473
+}
+```
+`event` ∈ `strike` | `disturber` | `noise` (disturber/noise optionally suppressed).
+
+**`status` payload (retained, LWT flips `online` to false on disconnect):**
+
+```json
+{
+  "station_id": "wtwlt-01",
+  "online": true,
+  "fw_version": "1.0.0",
+  "ip": "192.168.1.42",
+  "boot_ts": "2026-06-16T01:23:45Z"
+}
+```
+
+> **Time:** The ESP32 syncs the clock via SNTP on boot so `ts` is real UTC. If
+> the time sync fails, the Pi stamps arrival time on ingest as a fallback.
+
+### 3.4 Weather Meter Kit driver & calibration
+
+Use **`SFEWeatherMeterKit`** rather than hand-rolling pulse counting. Construct
+with the carrier's pins — `SFEWeatherMeterKit(windDirectionPin, windSpeedPin,
+rainfallPin)` — call `begin()`, then read with `getWindSpeed()` (km/h),
+`getWindDirection()` (deg), `getTotalRainfall()` (mm). The library handles the
+wind/rain interrupts and the vane ADC→bearing lookup internally.
+
+Calibration is set via `setCalibrationParams(SFEWeatherMeterKitCalibrationParams)`:
+
+| Field | Default | Notes |
+|-------|---------|-------|
+| `mmPerRainfallCount` | 0.2794 mm | Rain per bucket tip |
+| `kphPerCountPerSec` | 2.4 | Wind speed per count/sec |
+| `vaneADCValues[16]` | board default | ADC reading per vane bearing — **must recalibrate for the ESP32 ADC** |
+| `windSpeedMeasurementPeriodMillis` | — | Library's internal wind averaging window |
+| `minMillisPerRainfall` | — | Debounce between rain counts |
+
+**ESP32 ADC caveats (important):**
+- Call `setADCResolutionBits(12)` — ESP32 ADCs are 12-bit (0–4095).
+- The ESP32 ADC is **nonlinear** and clamps near its top voltage, so the stock
+  `vaneADCValues[]` table will mis-decode directions. Bench-calibrate the table
+  by recording the raw ADC at each of the 16 vane positions.
+
+Soil moisture (separate Qwiic sensor, not part of this library): calibrate
+raw→% using dry/wet endpoints for the specific probe.
+
+### 3.5 Configuration & secrets
+
+- **`secrets.h`** (gitignored): WiFi SSID/password, MQTT host/port/credentials,
+  `station_id`. A checked-in **`secrets.example.h`** documents the fields.
+- **`config.h`** (checked in): tunables — sample rate, publish interval,
+  calibration constants, lightning sensitivity/noise floor, topic prefix.
+- Changes require a **USB reflash** (no captive portal / no OTA in v1).
+
+### 3.6 Resilience
+
+- Auto-reconnect WiFi and MQTT with backoff.
+- Readings produced while disconnected are **dropped** (no flash buffering in v1).
+- Watchdog timer to recover from hangs.
+- LWT marks the station offline so the Pi/dashboard can show staleness.
+
+### 3.7 Firmware project layout
+
+```
+firmware/
+├── platformio.ini            # board, framework=arduino, lib deps pinned
+├── include/
+│   ├── config.h              # tunables + calibration (checked in)
+│   ├── secrets.h             # gitignored
+│   └── secrets.example.h     # template (checked in)
+├── src/
+│   ├── main.cpp              # setup/loop, scheduler, MQTT lifecycle
+│   ├── sensors/              # one module per sensor (bme280, veml6075, as3935,
+│   │                         #   wind, rain, soil)
+│   ├── aggregator.*          # 60 s windowing, vector wind avg, gust, rain accum
+│   ├── net/                  # wifi + mqtt + sntp
+│   └── payload.*             # JSON serialization of the MQTT contract
+├── lib/
+└── test/                     # native unit tests (aggregation, vane decode, JSON)
+```
+
+Candidate libraries (to pin in `platformio.ini`): SparkFun BME280, SparkFun
+VEML6075, SparkFun AS3935, **SparkFun_Weather_Meter_Kit_Arduino_Library**,
+SparkFun Qwiic soil sensor, PubSubClient (or `arduino-mqtt`), ArduinoJson.
+
+> **No vendor cloud.** SparkFun's examples publish to Arduino IoT Cloud; we do
+> not use it. The node's only network output is MQTT to the Pi.
+
+### 3.8 Phase 1 — Definition of Done
+
+- [ ] PlatformIO project builds and flashes to the ESP32.
+- [ ] All v1 sensors read correctly on the bench with sane values.
+- [ ] Wind vane decoded to 16 bearings; anemometer & rain calibrated.
+- [ ] AS3935 strikes detected with tuned noise floor.
+- [ ] Node connects to WiFi + Mosquitto and publishes valid `readings` JSON
+      every 60 s, `lightning` on event, and a retained `status`/LWT.
+- [ ] Survives WiFi/broker dropouts and auto-recovers.
+- [ ] Diagnostics (battery V, RSSI, uptime, fw version) populated.
+
+---
+
+## 4. Phase 2 — Raspberry Pi Server (future thinking)
+
+Lighter sketch; to be detailed when Phase 1 lands.
+
+- **Broker:** Mosquitto on the Pi (auth + ACLs; optionally TLS on the LAN).
+- **Ingest service:** subscribes to `wtwlt/station/+/readings` and `.../lightning`,
+  validates against the schema, and writes to the local DB. Tracks last-seen per
+  station for staleness/alerting.
+- **Database:** **TBD — decide in Phase 2.** This workload is small and gentle:
+  ~1 write/min (~1,440 rows/day, ~525k rows/year) plus occasional lightning
+  events, with reads split between "latest reading" and historical rollups —
+  all on a **resource-constrained Pi** (limited RAM, SD-card I/O). The data
+  volume is tiny; the real constraints are **memory footprint** and **SD-card
+  write wear**, so favor a light engine and batch/WAL writes.
+
+  Options to weigh:
+
+  | Option | Fit | Watch-outs |
+  |--------|-----|------------|
+  | **SQLite** (pragmatic default) | Tiny footprint, rock-solid, trivially handles 1 write/min; great for "latest" + indexed range reads; ubiquitous tooling | Ad-hoc analytics less ergonomic than columnar, but fine at this volume; use WAL mode |
+  | **DuckDB** | Excellent columnar analytics for historical rollups; single file; can query SQLite/Parquet directly | Not built for frequent small concurrent writes; higher RAM during queries on a Pi — batch inserts or use as a read/analytics layer over SQLite |
+  | **SQLite + DuckDB hybrid** | Best of both: write to SQLite, let DuckDB query the SQLite file for analytics | Two engines to manage |
+  | **RRDtool** | Purpose-built for this exact case: fixed-size round-robin store, automatic downsampling/rollups, very light on a Pi (classic weather-station choice) | Rigid pre-defined schema/retention; lossy consolidation by design; no ad-hoc queries |
+  | **VictoriaMetrics** | Lightweight single-binary TSDB, low memory, good on a Pi; built-in retention/downsampling | Another service to run; metrics-model rather than relational |
+  | **InfluxDB / TimescaleDB** | Purpose-built time-series with rich queries | Generally **too heavy** for a Pi (InfluxDB RAM use; Postgres footprint) — likely overkill here |
+
+  **Leaning:** SQLite (WAL) as the system of record for its footprint and write
+  safety, with DuckDB or simple precomputed rollup tables for historical
+  analytics — but confirm in Phase 2. RRDtool is the strong contender if we want
+  built-in, zero-maintenance downsampling and don't need ad-hoc queries.
+- **Retention/rollups:** keep full-resolution recent data; downsample older data
+  (hourly/daily aggregates) for "rough historical look."
+- **Units:** stored metric; conversions applied at the API/display layer.
+
+---
+
+## 5. Phase 3 — Public Website (future thinking)
+
+- **Hosting/exposure:** already handled — port-forwarding + DDNS + reverse proxy
+  are running. The web app only needs to **bind a local port on the Pi**; no
+  tunnel/cert work needed here.
+- **Current conditions:** live-ish dashboard (updates ~once/min) — temp,
+  humidity, pressure, wind (avg/gust/direction), rain, UV, soil moisture, recent
+  lightning, and station online/offline + last-updated.
+- **History:** charts over day/week/month/year with downsampled rollups;
+  daily rain totals; min/max/avg summaries.
+- **Units:** metric/imperial **toggle** (stored metric, converted for display).
+- Stack TBD (e.g. a small API + a JS frontend, or a server-rendered app);
+  decide in Phase 3.
+
+---
+
+## 6. Open Questions / To Decide Later
+
+- Temp/humidity/pressure/UV/soil: instantaneous-at-publish vs windowed mean?
+- Suppress AS3935 `disturber`/`noise` events, or publish them for tuning?
+- Bench-calibrate `vaneADCValues[16]` for the ESP32's 12-bit nonlinear ADC.
+- Soil moisture raw→% calibration endpoints.
+- Phase 2: final DB choice (SQLite vs DuckDB vs hybrid vs RRDtool/VictoriaMetrics)
+  and write strategy (WAL/batching) given the Pi's RAM and SD-wear constraints.
+- Multi-node support later? (`station_id` is already in the contract to allow it.)
+- Battery/solar sizing for continuous-awake operation.
+```
