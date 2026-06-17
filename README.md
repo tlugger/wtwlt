@@ -14,11 +14,16 @@ public website — see [`SPEC.md`](SPEC.md).
 
 ## Build & flash the firmware
 
+This repo uses [`just`](https://github.com/casey/just) as a task runner. Firmware
+recipes are namespaced under `firmware`:
+
 ```bash
-cd firmware
-cp include/secrets.example.h include/secrets.h   # then edit with your WiFi/MQTT
-pio run --target upload --target monitor
+just firmware secrets   # create firmware/include/secrets.h from the template, then edit it
+just firmware test      # host unit tests (no board needed)
+just firmware build     # compile for the ESP32
+just firmware flash     # flash over USB  (append /dev/cu.usbserial-XXXX for a specific port)
+just firmware dev       # flash, then open the serial monitor
 ```
 
-Full instructions, the pin map, and verification steps are in
-[`firmware/README.md`](firmware/README.md).
+Run `just` with no arguments to list recipes and modules. Full instructions, the
+pin map, and verification steps are in [`firmware/README.md`](firmware/README.md).

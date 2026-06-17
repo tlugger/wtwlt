@@ -1,0 +1,48 @@
+# Firmware tasks (ESP32 weather station).
+# Invoke from the repo root as `just firmware <recipe>`, or directly from
+# firmware/ as `just <recipe>`.
+set shell := ["bash", "-uc"]
+
+# Prefer the local PlatformIO venv (works around a broken Homebrew python);
+# fall back to `pio` on PATH (CI / other machines). Override with PIO=... .
+pio    := env_var_or_default("PIO", `if [ -x "$HOME/.platformio-venv/bin/pio" ]; then echo "$HOME/.platformio-venv/bin/pio"; else echo pio; fi`)
+fw_env := "esp32_micromod"
+
+# Show available recipes
+default:
+    @just --list
+
+# Compile the firmware for the ESP32
+build:
+    cd {{source_directory()}} && {{pio}} run -e {{fw_env}}
+
+# Run host-based unit tests (no board needed)
+test:
+    cd {{source_directory()}} && {{pio}} test -e native
+
+# Everything CI runs: unit tests + firmware build
+check: test build
+
+# Create include/secrets.h from the template if it's missing
+secrets:
+    cd {{source_directory()}} && if [ ! -f include/secrets.h ]; then cp include/secrets.example.h include/secrets.h && echo "created include/secrets.h — edit it with your WiFi/MQTT"; fi
+
+# Flash over USB. Optional port:  just firmware flash /dev/cu.usbserial-XXXX
+flash port="": secrets
+    cd {{source_directory()}} && {{pio}} run -e {{fw_env}} -t upload {{ if port == "" { "" } else { "--upload-port " + port } }}
+
+# Open the serial monitor (Ctrl-C to exit). Optional port arg.
+monitor port="":
+    cd {{source_directory()}} && {{pio}} device monitor -e {{fw_env}} {{ if port == "" { "" } else { "--port " + port } }}
+
+# Flash, then immediately open the serial monitor
+dev port="": secrets
+    cd {{source_directory()}} && {{pio}} run -e {{fw_env}} -t upload -t monitor {{ if port == "" { "" } else { "--upload-port " + port } }}
+
+# List connected serial devices (find your upload port here)
+devices:
+    {{pio}} device list
+
+# Remove firmware build artifacts
+clean:
+    cd {{source_directory()}} && {{pio}} run -e {{fw_env}} -t clean

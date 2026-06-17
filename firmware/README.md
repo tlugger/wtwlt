@@ -46,6 +46,12 @@ address/login, and this station's `STATION_ID`.
 
 ## Build & flash
 
+From the repo root, the [`just`](https://github.com/casey/just) recipes wrap all
+of this — `just firmware build`, `just firmware flash`, `just firmware dev`,
+`just firmware monitor`, `just firmware devices` (run `just` to list them, or
+`just firmware <recipe>` directly). You can also run the bare recipe (`just
+build`) from inside `firmware/`. The raw PlatformIO commands below are equivalent:
+
 ```bash
 cd firmware
 
@@ -107,8 +113,7 @@ direction vector-averaging, rain deltas, cardinal mapping) has host-based unit
 tests that run with no board attached:
 
 ```bash
-cd firmware
-pio test -e native
+just firmware test     # or, equivalently:  cd firmware && pio test -e native
 ```
 
 These run automatically in CI on pull requests and pushes to `main`
@@ -118,6 +123,7 @@ These run automatically in CI on pull requests and pushes to `main`
 
 ```
 firmware/
+├── justfile                  # firmware task recipes (just firmware <recipe>)
 ├── platformio.ini            # board, framework, pinned libraries
 ├── include/
 │   ├── config.h              # pins, cadence, calibration (checked in)
