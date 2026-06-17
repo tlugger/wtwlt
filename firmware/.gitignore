@@ -1,0 +1,11 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Secrets — copy secrets.example.h to secrets.h and fill in (never commit)
+include/secrets.h
+
+# Editor / OS
+.vscode/
+.DS_Store

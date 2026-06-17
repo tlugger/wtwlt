@@ -48,7 +48,7 @@ These were settled during scoping and drive the design below.
 | Transport | **MQTT over WiFi**; Mosquitto broker runs on the Pi |
 | Power & placement | **Outdoor, solar + battery**, **continuously awake** (no deep sleep) |
 | Cadence | Sample **@1 Hz**, publish **aggregated every 60 s** |
-| Sensors (v1) | Temp, humidity, pressure (BME280); **UV index** (VEML6075); **lightning** (AS3935); wind speed + direction + rain (Weather Meter Kit); soil moisture (Qwiic) |
+| Sensors (v1) | Temp, humidity, pressure (BME280, I²C); **UV index** (VEML6075, I²C); **lightning** (AS3935, **SPI**); wind speed + direction + rain (Weather Meter Kit); soil moisture (**analog** terminal) |
 | Units on the wire | **Metric / SI**; website displays both (metric/imperial toggle) |
 | Config & updates | **Hardcoded credentials** in a gitignored header; **USB reflash** for changes |
 | Outage behavior | **Reconnect & drop gaps** — no on-device buffering in v1 |
@@ -66,8 +66,8 @@ These were settled during scoping and drive the design below.
 - Onboard sensors used in v1:
   - **BME280** — temperature, relative humidity, barometric pressure (I²C).
   - **VEML6075** — UV-A / UV-B → UV index (I²C).
-  - **AS3935** — lightning detection (strike/disturber/noise, distance estimate;
-    interrupt-driven).
+  - **AS3935** — lightning detection (strike/disturber/noise, distance estimate),
+    on **SPI** (CS = GPIO 12), interrupt-driven.
 - **SparkFun Weather Meter Kit** (via the carrier's screw terminals / RJ11),
   driven by the **`SFEWeatherMeterKit`** library, which owns the interrupt
   handlers and the vane decode (see §3.4):
@@ -77,16 +77,30 @@ These were settled during scoping and drive the design below.
     bearings** via the `vaneADCValues[]` table. `getWindDirection()` → degrees.
   - **Rain gauge** — tipping bucket reed switch; library accumulates via
     `mmPerRainfallCount` (default **0.2794 mm/tip**). `getTotalRainfall()` → mm.
-- **Soil moisture sensor** on the **Qwiic** bus (I²C). v1 reports moisture only
-  (no soil temperature).
+- **Soil moisture sensor** on the carrier's **analog terminal** (A0 / GPIO 39,
+  ADC1 — WiFi-safe). v1 reports moisture only (raw ADC → % via bench-calibrated
+  dry/wet endpoints). If you instead use a Qwiic I²C soil sensor, swap the soil
+  module for an I²C driver.
 - **Power:** solar panel + LiPo battery with a charge controller. The node runs
   **continuously awake** — sized so the panel/battery survive cloudy stretches.
   Battery voltage is reported in diagnostics so we can monitor the power budget
   in the field.
 
-> Wind and rain are pulse-counted with interrupts. Because the node never
-> deep-sleeps, every gust and bucket tip is captured for true per-minute averages
-> and accurate rain accumulation.
+**Pin map** (SparkFun MicroMod Weather Carrier + ESP32 MicroMod Processor):
+
+| Signal | Pin | Bus / notes |
+|--------|-----|-------------|
+| Wind direction (vane) | GPIO 35 (A1) | ADC1 — WiFi-safe analog |
+| Wind speed (anemometer) | GPIO 23 (D0) | digital, interrupt |
+| Rain gauge | GPIO 27 (D1) | digital, interrupt |
+| Soil moisture | GPIO 39 (A0) | ADC1 analog terminal |
+| AS3935 lightning | CS = GPIO 12 | SPI; INT pin **TBD/verify** |
+| BME280 / VEML6075 | I²C | 0x77 / 0x10 |
+
+> Wind and rain are pulse-counted with interrupts (handled inside
+> `SFEWeatherMeterKit`). Because the node never deep-sleeps, every gust and
+> bucket tip is captured for true per-minute averages and accurate rain
+> accumulation.
 
 ### 3.2 Sampling & aggregation
 
