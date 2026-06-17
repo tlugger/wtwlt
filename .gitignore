@@ -1,0 +1,36 @@
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Secrets — never commit credentials
+**/secrets.h
+*.env
+.env
+.env.*
+
+# PlatformIO (firmware build artifacts)
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Python (future: Pi server)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node (future: web)
+node_modules/
+dist/
+build/
+*.log
+
+# Local data / databases (future: Pi)
+*.db
+*.duckdb
+*.sqlite
+*.sqlite3
+data/
