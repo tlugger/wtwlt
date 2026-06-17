@@ -30,6 +30,9 @@ jobs:
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
+      - name: Generate placeholder secrets.h
+        run: just firmware secrets
+
       - name: Run native unit tests
         run: just firmware test
 

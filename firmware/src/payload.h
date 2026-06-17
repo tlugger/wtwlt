@@ -1,7 +1,9 @@
 // payload.h — JSON serialization of the MQTT contract (see SPEC.md §3.3).
 #pragma once
 
-#include <Arduino.h>
+// <stdint.h>/<stddef.h> (not <Arduino.h>) so payload is host-testable.
+#include <stdint.h>
+#include <stddef.h>
 #include "aggregator.h"
 #include "sensors/sensors.h"
 

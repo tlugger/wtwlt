@@ -108,9 +108,14 @@ You should see retained `.../status` (online), a `.../readings` message every
 
 ## Tests
 
-The hardware-independent logic (the 60 s aggregation: wind averaging, gust,
-direction vector-averaging, rain deltas, cardinal mapping) has host-based unit
-tests that run with no board attached:
+The hardware-independent logic has host-based unit tests that run with no board
+attached:
+
+- **aggregation** — wind averaging, gust, direction vector-averaging, rain
+  deltas, cardinal mapping
+- **MQTT payload contract** — field names, metric→SI conversions, NAN→null for
+  absent sensors, and the lightning/status message shapes (SPEC §3.3)
+
 
 ```bash
 just firmware test     # or, equivalently:  cd firmware && pio test -e native

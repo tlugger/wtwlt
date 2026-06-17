@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include <math.h>
+#include <stdio.h>   // snprintf (was pulled in transitively via Arduino.h)
 
 namespace {
 // Add a float field, or null when the value is NAN.

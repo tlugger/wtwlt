@@ -2,7 +2,10 @@
 // Credentials live in secrets.h (see secrets.example.h).
 #pragma once
 
-#include <Arduino.h>
+// <stdint.h> (not <Arduino.h>) so this header — and payload.cpp, which includes
+// it — compiles on the host for native unit tests. Only fixed-width int types
+// are needed here.
+#include <stdint.h>
 
 // ---------------------------------------------------------------------------
 // Firmware identity
