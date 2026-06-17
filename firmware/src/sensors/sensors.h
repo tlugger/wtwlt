@@ -1,7 +1,10 @@
 // sensors.h — sensor bring-up and reads for the MicroMod Weather Carrier.
 #pragma once
 
-#include <Arduino.h>
+// Note: this header intentionally avoids <Arduino.h> so the data structs below
+// (and the aggregator that consumes them) compile on the host for native unit
+// tests. .cpp files that need Arduino include config.h / <Arduino.h> themselves.
+#include <stdint.h>
 #include <math.h>
 
 // One instantaneous sample. NAN / have-flags mark sensors that are absent or

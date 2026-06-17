@@ -100,6 +100,20 @@ mosquitto_sub -h <pi-host> -t 'wtwlt/station/+/#' -v
 You should see retained `.../status` (online), a `.../readings` message every
 ~60 s, and `.../lightning` on strikes.
 
+## Tests
+
+The hardware-independent logic (the 60 s aggregation: wind averaging, gust,
+direction vector-averaging, rain deltas, cardinal mapping) has host-based unit
+tests that run with no board attached:
+
+```bash
+cd firmware
+pio test -e native
+```
+
+These run automatically in CI on pull requests and pushes to `main`
+(`.github/workflows/ci.yml`). Tests live in `test/`.
+
 ## Project layout
 
 ```
@@ -109,12 +123,13 @@ firmware/
 │   ├── config.h              # pins, cadence, calibration (checked in)
 │   ├── secrets.example.h     # credentials template (checked in)
 │   └── secrets.h             # your credentials (gitignored)
-└── src/
-    ├── main.cpp              # scheduler: sample @1 Hz, publish @60 s
-    ├── sensors/              # sensor bring-up + reads + lightning
-    ├── aggregator.*          # 60 s windowing, vector wind avg, gust, rain delta
-    ├── net/                  # WiFi + MQTT + SNTP + retained LWT status
-    └── payload.*             # JSON serialization of the MQTT contract
+├── src/
+│   ├── main.cpp              # scheduler: sample @1 Hz, publish @60 s
+│   ├── sensors/              # sensor bring-up + reads + lightning
+│   ├── aggregator.*          # 60 s windowing, vector wind avg, gust, rain delta
+│   ├── net/                  # WiFi + MQTT + SNTP + retained LWT status
+│   └── payload.*             # JSON serialization of the MQTT contract
+└── test/                     # host-based unit tests (pio test -e native)
 ```
 
 ## Notes & caveats

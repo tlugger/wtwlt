@@ -8,8 +8,9 @@ uint32_t g_samples = 0;
 float    g_rainBaseline = 0;
 
 // Wind speed
-float g_windSum = 0;
-float g_windGust = 0;
+float    g_windSum = 0;
+float    g_windGust = 0;
+uint32_t g_windCount = 0;   // count of valid (non-NAN) wind samples
 
 // Wind direction as unit vectors (avoids the 0/360 wraparound problem)
 double g_dirSin = 0;
@@ -34,6 +35,7 @@ void reset(float rainBaselineMm) {
   g_rainBaseline = rainBaselineMm;
   g_windSum = 0;
   g_windGust = 0;
+  g_windCount = 0;
   g_dirSin = 0;
   g_dirCos = 0;
 }
@@ -44,6 +46,7 @@ void addSample(const SensorReading &r) {
 
   if (!isnan(r.windSpeedKph)) {
     g_windSum += r.windSpeedKph;
+    g_windCount++;
     if (r.windSpeedKph > g_windGust) g_windGust = r.windSpeedKph;
   }
   if (!isnan(r.windDirDeg)) {
@@ -57,7 +60,7 @@ Window finalize(float currentTotalRainMm) {
   Window w;
   w.samples = g_samples;
 
-  w.windAvgKph  = g_samples ? (g_windSum / g_samples) : 0;
+  w.windAvgKph  = g_windCount ? (g_windSum / g_windCount) : 0;
   w.windGustKph = g_windGust;
 
   float dir = atan2(g_dirSin, g_dirCos) * 180.0 / M_PI;
