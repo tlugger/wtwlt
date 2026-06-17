@@ -259,7 +259,8 @@ SparkFun Qwiic soil sensor, PubSubClient (or `arduino-mqtt`), ArduinoJson.
 
 ### 3.8 Phase 1 — Definition of Done
 
-- [ ] PlatformIO project builds and flashes to the ESP32.
+- [x] PlatformIO project builds for `esp32_micromod` (compile verified + in CI).
+- [ ] Firmware flashes and boots on real hardware.
 - [ ] All v1 sensors read correctly on the bench with sane values.
 - [ ] Wind vane decoded to 16 bearings; anemometer & rain calibrated.
 - [ ] AS3935 strikes detected with tuned noise floor.

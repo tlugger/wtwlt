@@ -134,9 +134,9 @@ firmware/
 
 ## Notes & caveats
 
-- The SparkFun sensor library method names (BME280 / VEML6075 / AS3935) are a
-  first-draft best effort; if compilation fails on a sensor call, check the
-  installed library's headers and adjust the matching `sensors.cpp` function.
+- The firmware compiles cleanly against the library versions pinned in
+  `platformio.ini` (verified in CI). Sensor *behavior* is still unverified on
+  real hardware — see the calibration TODOs above.
 - v1 has **no OTA and no captive portal** — config changes mean a USB reflash.
 - During an outage the node reconnects and simply drops readings produced while
   offline (no on-device buffering).

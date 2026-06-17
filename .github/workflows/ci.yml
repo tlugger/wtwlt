@@ -31,3 +31,33 @@ jobs:
       - name: Run native unit tests
         working-directory: firmware
         run: pio test -e native
+
+  firmware-build:
+    name: Firmware build (ESP32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: ${{ runner.os }}-pio-build-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-build-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Generate placeholder secrets.h
+        working-directory: firmware
+        run: cp include/secrets.example.h include/secrets.h
+
+      - name: Compile firmware
+        working-directory: firmware
+        run: pio run -e esp32_micromod

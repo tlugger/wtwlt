@@ -63,9 +63,9 @@ don't batch it up for later:**
 - **Hardware values to confirm on real hardware** (don't trust the scaffold
   blindly): the AS3935 interrupt pin, the wind-vane `vaneADCValues[]`, and soil
   dry/wet endpoints. These are marked `VERIFY`/`TODO` in `config.h`/`sensors.cpp`.
-- **Verify library APIs against installed versions.** The `SFEWeatherMeterKit`
-  API was checked upstream; the BME280/VEML6075/AS3935 calls are best-effort
-  until a real `pio run` confirms them.
+- **The firmware compiles** for `esp32_micromod` against the pinned library
+  versions (enforced in CI). What remains unverified is on-hardware *behavior*,
+  not the API surface.
 
 ## Future-phase notes (not yet built)
 

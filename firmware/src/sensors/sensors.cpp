@@ -130,15 +130,15 @@ bool pollLightning(LightningEvent &ev) {
 
   // Reading the interrupt register also clears it on the AS3935.
   int intVal = lightning.readInterruptReg();
-  if (intVal == LIGHTNING_INT) {
+  if (intVal == LIGHTNING) {
     ev.type       = "strike";
     ev.distanceKm = lightning.distanceToStorm();
     ev.energy     = lightning.lightningEnergy();
     return true;
   }
 #if LIGHTNING_REPORT_NONSTRIKE
-  if (intVal == DISTURBER_INT) { ev.type = "disturber"; ev.distanceKm = 0; ev.energy = 0; return true; }
-  if (intVal == NOISE_INT)     { ev.type = "noise";     ev.distanceKm = 0; ev.energy = 0; return true; }
+  if (intVal == DISTURBER_DETECT) { ev.type = "disturber"; ev.distanceKm = 0; ev.energy = 0; return true; }
+  if (intVal == NOISE_TO_HIGH)    { ev.type = "noise";     ev.distanceKm = 0; ev.energy = 0; return true; }
 #endif
 #endif
   return false;
