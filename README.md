@@ -43,8 +43,9 @@ just server broker   # terminal 1: start Mosquitto
 just server run      # terminal 2: start the Go service (ingests -> SQLite, serves API)
 just server setup    # terminal 3: one-time, create the mock venv
 just server mock     # terminal 3: publish mock readings/lightning/status
-
-curl localhost:8080/api/current   # latest reading
 ```
+
+Then open the dashboard at <http://localhost:8080/> (earth-toned, theme shifts
+with time of day + conditions), or `curl localhost:8080/api/current`.
 
 Details in [`server/README.md`](server/README.md).

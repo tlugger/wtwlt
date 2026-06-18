@@ -7,6 +7,7 @@ package web
 
 import (
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,9 @@ import (
 	"github.com/tlugger/wtwlt/server/internal/units"
 )
 
+//go:embed dashboard.html
+var dashboardHTML []byte
+
 const defaultStation = "wtwlt-01"
 
 type Server struct {
@@ -31,6 +35,7 @@ func New(st *store.Store) *Server { return &Server{store: st} }
 // Handler returns the HTTP routes (stdlib mux; Go 1.22+ method+path patterns).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", s.dashboard)
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /api/current", s.current)
 	mux.HandleFunc("GET /api/history", s.history)
@@ -38,6 +43,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/lightning", s.lightning)
 	mux.HandleFunc("GET /api/stations", s.stations)
 	return mux
+}
+
+func (s *Server) dashboard(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(dashboardHTML)
 }
 
 func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {

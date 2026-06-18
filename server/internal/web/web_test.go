@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +43,30 @@ func fp(v float64) *float64 { return &v }
 func ts(s string) time.Time {
 	tm, _ := time.Parse(time.RFC3339, s)
 	return tm
+}
+
+func TestDashboard(t *testing.T) {
+	_, h := newServer(t)
+	rr := do(t, h, "/")
+	if rr.Code != 200 {
+		t.Fatalf("dashboard status = %d", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("content-type = %q", ct)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"<!DOCTYPE html>", "wtwlt", "/api/current", "data-theme"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard missing %q", want)
+		}
+	}
+}
+
+func TestUnknownPath404(t *testing.T) {
+	_, h := newServer(t)
+	if rr := do(t, h, "/nope"); rr.Code != 404 {
+		t.Errorf("want 404 for unknown path, got %d", rr.Code)
+	}
 }
 
 func TestHealthz(t *testing.T) {

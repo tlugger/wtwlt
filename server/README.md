@@ -34,6 +34,7 @@ SQLite (WAL mode), and an HTTP server goroutine that reads from it.
 
 | Route | Returns |
 |-------|---------|
+| `GET /` | the dashboard (single embedded HTML page) |
 | `GET /healthz` | `ok` |
 | `GET /api/current` | latest reading for a station |
 | `GET /api/history` | time-bucketed aggregates for charts |
@@ -80,7 +81,9 @@ just server setup      # terminal 3: one-time, create mock venv
 just server mock       # terminal 3: publish mock readings/lightning/status
 ```
 
-Then query the API:
+Then open the **dashboard** at <http://localhost:8080/> — an earth-toned page
+whose theme shifts with time of day and live conditions (clear/dusk/night/rain/
+storm). Or query the API directly:
 
 ```bash
 curl localhost:8080/api/current

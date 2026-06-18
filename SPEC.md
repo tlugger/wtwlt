@@ -323,22 +323,55 @@ Lighter sketch; to be detailed when Phase 1 lands.
 
 ---
 
-## 5. Phase 3 — Public Website (future thinking)
+## 5. Phase 3 — Public Website / Dashboard
+
+> **Status:** v1 dashboard implemented — `server/internal/web/dashboard.html`
+> (embedded, served at `/`): earth-tone dynamic theming, "right now" hero,
+> range-selectable history charts, summary cards, lightning feed, °C/°F toggle.
 
 - **Hosting/exposure:** already handled — port-forwarding + DDNS + reverse proxy
-  are running. The web app only needs to **bind a local port on the Pi**; no
-  tunnel/cert work needed here.
-- **Current conditions:** live-ish dashboard (updates ~once/min) — temp,
-  humidity, pressure, wind (avg/gust/direction), rain, UV, soil moisture, recent
-  lightning, and station online/offline + last-updated.
-- **History:** charts over day/week/month/year with downsampled rollups;
-  daily rain totals; min/max/avg summaries.
-- **Units:** metric/imperial **toggle** (stored metric, converted for display).
-- **Same Go binary as ingest (§4).** The website/API is served by the same Go
-  service that ingests MQTT — not a separate process or language. A single static
-  binary suits the resource-constrained Pi (low memory, trivial deployment, fast).
-  Frontend approach (server-rendered Go templates + light JS, vs. a JS framework
-  hitting a Go JSON API) is TBD, but the server is Go.
+  are running. The web app only needs to **bind a local port on the Pi**.
+- **Architecture:** served by the **same Go binary** (§4) — a self-contained HTML
+  page embedded via `go:embed` at `/`, consuming the `/api/*` JSON endpoints.
+  Vanilla JS, **no build step**; charts via **Chart.js (CDN)**; mobile-first.
+  (Follows the proven `rockiscope` dashboard pattern.)
+
+### Design language
+
+- **Natural / earth tones.** It measures the natural world, so it should feel
+  natural: soil/bark browns, moss/sage greens, clay/terracotta, sand/parchment,
+  muted sky blues, with a warm ochre/amber accent.
+- **Typography:** Raleway (carried from the personal site) for headings; a clean
+  readable sans for data.
+- **Layout:** Rockiscope's card/panel/grid skeleton, warmed up (earthy surfaces,
+  soft borders).
+- **Tone:** light personality — clean and informative with the occasional wink
+  (tagline, empty states); not a comedy act.
+
+### Dynamic theming (time of day + conditions)
+
+The palette shifts with the local clock **and** the live reading, within the
+earthy family:
+- **day** → bright warm sky/sand · **dusk** → terracotta/amber/violet · **night**
+  → deep soil/indigo.
+- condition overlays: **rain** → mossy slate · **storm** (recent lightning) →
+  dark slate + lightning-gold accent.
+- Condition inferred from available data: recent lightning ⇒ storm; `rain_mm > 0`
+  ⇒ rain; else clear. Time of day from the local clock (sunrise/sunset approx).
+- Implemented as `[data-theme]` CSS-variable sets switched in JS.
+
+### Content / layout
+
+- **Header:** wordmark + tagline, station online + last-updated, °C/°F toggle
+  (persisted in `localStorage`), source link.
+- **"Right now" hero:** big current temp + condition glyph, with humidity,
+  pressure, wind (avg/gust + direction), UV, soil moisture, rain.
+- **Today summary cards:** high/low, total rain, peak gust (`/api/summary`).
+- **History charts** (range chips 24h / 7d / 30d → `/api/history`, bucket
+  raw/hour/day): temperature, humidity + pressure, wind (avg/gust), rain (bars).
+- **Lightning feed:** recent strikes with distance + time; calm-skies empty state.
+- **Auto-refresh** current conditions ~every 60 s.
+- **Units:** metric default, toggle to imperial (API `units=` param).
 
 ---
 
