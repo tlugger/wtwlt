@@ -20,8 +20,8 @@ Pi-side server, and the web frontend.
 │  Weather Station Node    │ ───────────────────────▶ │  Raspberry Pi                  │
 │  ESP32 + SparkFun        │   (Mosquitto broker on    │                                │
 │  MicroMod Weather        │    the Pi)                │  • Mosquitto broker            │
-│  Carrier Board           │                           │  • Ingest service → local DB   │
-│                          │                           │  • Web app on a local port     │
+│  Carrier Board           │                           │  • Go service: MQTT ingest →   │
+│                          │                           │    local DB → website / API    │
 │  Solar + battery, always │                           │    (public exposure already    │
 │  awake, publishes 1×/min │                           │     handled by existing        │
 │                          │                           │     port-forward + DDNS +       │
@@ -30,9 +30,9 @@ Pi-side server, and the web frontend.
 ```
 
 **Data flow:** Sensors → ESP32 samples @1 Hz → aggregates over 60 s → publishes
-one JSON message per minute (plus event-driven lightning messages) to MQTT → Pi
-ingest service persists to the local DB → web app reads the DB and renders
-current + historical views.
+one JSON message per minute (plus event-driven lightning messages) to MQTT → a
+single **Go service** on the Pi subscribes, persists to the local DB, and serves
+the website/API that reads the DB for current + historical views.
 
 ---
 
@@ -53,8 +53,8 @@ These were settled during scoping and drive the design below.
 | Config & updates | **Hardcoded credentials** in a gitignored header; **USB reflash** for changes |
 | Outage behavior | **Reconnect & drop gaps** — no on-device buffering in v1 |
 | Firmware toolchain | **PlatformIO** |
-| Ingest service language | **Python** (also the language of the `server/` mock publisher) |
-| Website language | **Go** — single static binary, low footprint on the Pi (explicitly not Python) |
+| Pi backend | **Single Go service** — MQTT ingest + DB writes + website/API in one static binary (low footprint, cgo-free cross-compile to the Pi). Not Python. |
+| Dev tooling | `server/` mock publisher stays **Python** — a test fixture only, never deployed |
 | Public hosting | **Already set up** (port-forward + DDNS + reverse proxy); web app only needs to bind a local port on the Pi |
 
 ---
@@ -277,14 +277,20 @@ SparkFun Qwiic soil sensor, PubSubClient (or `arduino-mqtt`), ArduinoJson.
 
 Lighter sketch; to be detailed when Phase 1 lands.
 
+- **One Go service.** A single Go binary does ingest **and** serves the website
+  (§5) — MQTT subscriber goroutine writes to the DB; HTTP server goroutine reads
+  it. One language, one deploy artifact. Proposed stack: `eclipse/paho.mqtt.golang`
+  (MQTT client), `modernc.org/sqlite` (pure-Go, cgo-free → trivial
+  `GOOS=linux GOARCH=arm64` cross-compile to the Pi), stdlib `net/http`.
 - **Broker:** Mosquitto on the Pi (auth + ACLs; optionally TLS on the LAN). A
   local dev broker config + a mock publisher (faithful to §3.3) already exist in
-  `server/` for exercising the publish path without hardware.
-- **Ingest service (Python):** subscribes to `wtwlt/station/+/readings` and
-  `.../lightning`, validates against the schema, and writes to the local DB.
-  Tracks last-seen per station for staleness/alerting. (The mock publisher in
-  `server/` is already Python; the ingest service stays Python too.)
-- **Database:** **TBD — decide in Phase 2.** This workload is small and gentle:
+  `server/` for exercising the publish path without hardware. The mock stays
+  Python (test fixture only); the deployed service is Go.
+- **Ingest (Go):** subscribes to `wtwlt/station/+/readings` and `.../lightning`,
+  validates against the schema, and writes to the local DB. Tracks last-seen per
+  station for staleness/alerting.
+- **Database:** **SQLite** (`modernc.org/sqlite`, cgo-free, WAL) embedded in the
+  Go service — see the comparison + rationale below. This workload is small and gentle:
   ~1 write/min (~1,440 rows/day, ~525k rows/year) plus occasional lightning
   events, with reads split between "latest reading" and historical rollups —
   all on a **resource-constrained Pi** (limited RAM, SD-card I/O). The data
@@ -302,10 +308,12 @@ Lighter sketch; to be detailed when Phase 1 lands.
   | **VictoriaMetrics** | Lightweight single-binary TSDB, low memory, good on a Pi; built-in retention/downsampling | Another service to run; metrics-model rather than relational |
   | **InfluxDB / TimescaleDB** | Purpose-built time-series with rich queries | Generally **too heavy** for a Pi (InfluxDB RAM use; Postgres footprint) — likely overkill here |
 
-  **Leaning:** SQLite (WAL) as the system of record for its footprint and write
-  safety, with DuckDB or simple precomputed rollup tables for historical
-  analytics — but confirm in Phase 2. RRDtool is the strong contender if we want
-  built-in, zero-maintenance downsampling and don't need ad-hoc queries.
+  **Leaning:** the single-Go-binary design points strongly at **SQLite** —
+  embedded in-process (no separate service), and `modernc.org/sqlite` keeps the
+  build cgo-free for easy ARM cross-compile. Use WAL mode so the ingest goroutine
+  writes while the HTTP goroutine reads. Historical analytics can use precomputed
+  rollup tables. (RRDtool/VictoriaMetrics are separate services and DuckDB's Go
+  driver needs cgo — all cut against the one-binary goal.) Confirm in Phase 2.
 - **Retention/rollups:** keep full-resolution recent data; downsample older data
   (hourly/daily aggregates) for "rough historical look."
 - **Units:** stored metric; conversions applied at the API/display layer.
@@ -323,21 +331,57 @@ Lighter sketch; to be detailed when Phase 1 lands.
 - **History:** charts over day/week/month/year with downsampled rollups;
   daily rain totals; min/max/avg summaries.
 - **Units:** metric/imperial **toggle** (stored metric, converted for display).
-- **Language: Go.** The public website/API is built in **Go** (not Python) — a
-  single static binary is a great fit for the resource-constrained Pi (low memory,
-  trivial deployment, fast). Frontend approach (server-rendered Go templates +
-  light JS, vs. a JS framework hitting a Go JSON API) is TBD, but the server is Go.
+- **Same Go binary as ingest (§4).** The website/API is served by the same Go
+  service that ingests MQTT — not a separate process or language. A single static
+  binary suits the resource-constrained Pi (low memory, trivial deployment, fast).
+  Frontend approach (server-rendered Go templates + light JS, vs. a JS framework
+  hitting a Go JSON API) is TBD, but the server is Go.
 
 ---
 
-## 6. Open Questions / To Decide Later
+## 6. Release & Deployment (build LAST — reference plan)
+
+> Deferred until the Go service is functional. Captured here so it isn't lost.
+> Pattern proven across other projects (adapted from `tlugger/rockiscope`).
+
+**Goal:** install/update the Pi service with one piped command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tlugger/wtwlt/main/install.sh | sudo bash
+```
+
+**Release workflow** (`.github/workflows/release.yml`, `workflow_dispatch` with
+`branch` + `version` inputs):
+- Cross-compile the Go server for `linux/arm64`, `linux/amd64`, `linux/arm`
+  (artifacts `wtwlt-server-linux-<arch>`), build from `server/`.
+- Emit `sha256` checksums per binary.
+- Create/replace the version tag and a GitHub Release with the binaries +
+  checksums (`softprops/action-gh-release`, `generate_release_notes`).
+
+**Install script** (`install.sh` at repo root, idempotent installer + updater):
+- Detect arch (`uname -m` → arm64/arm/amd64); stop the running service first.
+- Download the latest release binary matching the arch; **fallback to building
+  from source** (`git clone` + `go build` in `server/`) if no release/binary.
+- Install to `/home/pi/wtwlt/wtwlt-server`; create `.env` (MQTT host/port/user/
+  pass, HTTP addr) if missing.
+- Write a `systemd` unit (`After=network-online.target mosquitto.service`,
+  `Restart=always`, `EnvironmentFile=.env`, logs to the install dir),
+  `daemon-reload`, `enable`, `(re)start`.
+- Re-running upgrades in place (stop → swap binary → restart).
+- Nice-to-have UX from the reference: spinner, step/ok/warn/fail helpers, a
+  `version` self-check after install.
+
+---
+
+## 7. Open Questions / To Decide Later
 
 - Temp/humidity/pressure/UV/soil: instantaneous-at-publish vs windowed mean?
 - Suppress AS3935 `disturber`/`noise` events, or publish them for tuning?
 - Bench-calibrate `vaneADCValues[16]` for the ESP32's 12-bit nonlinear ADC.
 - Soil moisture raw→% calibration endpoints.
-- Phase 2: final DB choice (SQLite vs DuckDB vs hybrid vs RRDtool/VictoriaMetrics)
-  and write strategy (WAL/batching) given the Pi's RAM and SD-wear constraints.
+- ~~Phase 2: final DB choice~~ — **decided: SQLite** (`modernc.org/sqlite`,
+  cgo-free, WAL) embedded in the Go service. Rollup/downsample strategy for old
+  data still TBD.
 - Multi-node support later? (`station_id` is already in the contract to allow it.)
 - Battery/solar sizing for continuous-awake operation.
 ```

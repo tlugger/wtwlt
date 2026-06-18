@@ -1,38 +1,75 @@
 # wtwlt server
 
-Raspberry Pi side of the weather station. Today this contains a local
-**Mosquitto broker config** and a **mock publisher** so the MQTT publish path can
-be exercised end-to-end before the ESP32 hardware exists. (Ingest + database +
-the public website come later — see [`../SPEC.md`](../SPEC.md) §4–5.)
+Raspberry Pi side of the weather station: a **single Go service** that ingests
+the station's MQTT messages into SQLite and serves the website/API from the same
+binary. This directory also holds a local Mosquitto config and a Python mock
+publisher for exercising the pipeline without hardware.
 
-The mock publisher emits the exact message contract the firmware uses
-([`../SPEC.md`](../SPEC.md) §3.3): metric/SI units, wind in m/s, a retained
-`status` message, and an LWT that flips the station offline on disconnect.
+Message shapes follow the firmware's MQTT contract in [`../SPEC.md`](../SPEC.md)
+§3.3 (metric/SI, wind in m/s, NAN→null, retained `status` + LWT).
+
+## The Go service
+
+```bash
+just server build    # compile -> server/wtwlt-server
+just server run      # run locally (reads WTWLT_* env)
+just server test     # Go unit tests (model parsing + SQLite store)
+just server vet      # go vet
+```
+
+It runs two things in one process: an MQTT subscriber goroutine that writes to
+SQLite (WAL mode), and an HTTP server goroutine that reads from it.
+
+**Config** (environment variables, with defaults):
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `WTWLT_MQTT_HOST` | `localhost` | broker host |
+| `WTWLT_MQTT_PORT` | `1883` | broker port |
+| `WTWLT_MQTT_USER` / `WTWLT_MQTT_PASS` | _(empty)_ | broker auth (if enabled) |
+| `WTWLT_HTTP_ADDR` | `:8080` | HTTP listen address |
+| `WTWLT_DB_PATH` | `./wtwlt.db` | SQLite file (or `$WTWLT_DATA_DIR/wtwlt.db`) |
+
+**HTTP endpoints:**
+
+| Route | Returns |
+|-------|---------|
+| `GET /healthz` | `ok` |
+| `GET /api/current?station=wtwlt-01` | latest reading for a station |
+| `GET /api/stations` | status (online/offline, last-seen) of all stations |
+
+**DB:** SQLite via `modernc.org/sqlite` (pure Go, cgo-free) — so it cross-compiles
+to the Pi with a plain `GOOS=linux GOARCH=arm64 go build`.
 
 ## Prerequisites
 
-- **Mosquitto** (broker + `mosquitto_sub`/`mosquitto_pub` clients):
-  ```bash
-  brew install mosquitto
-  ```
-- **Python 3** (for the mock publisher; uses a local venv).
+- **Go** (toolchain version is pinned in `go.mod`).
+- **Mosquitto** (broker + clients) for the local broker/mock:
+  `brew install mosquitto`.
+- **Python 3** for the mock publisher (uses a local venv).
 
-## Quick start
+## Exercise the full pipeline (no hardware)
 
 Run each in its own terminal, from the repo root:
 
 ```bash
-just server setup      # one-time: create .venv and install paho-mqtt
-just server broker     # terminal 1: start Mosquitto (Ctrl-C to stop)
-just server watch      # terminal 2: subscribe to wtwlt/#  (live message feed)
+just server broker     # terminal 1: start Mosquitto
+just server run        # terminal 2: start the Go service (ingests -> SQLite)
+just server setup      # terminal 3: one-time, create mock venv
 just server mock       # terminal 3: publish mock readings/lightning/status
 ```
 
-You should see a retained `.../status` message (online), a `.../readings`
-message every few seconds, and occasional `.../lightning` events in the `watch`
-terminal.
+Then query the API:
 
-Useful options on the publisher:
+```bash
+curl localhost:8080/api/current
+curl localhost:8080/api/stations
+```
+
+`just server watch` (a raw `mosquitto_sub` on `wtwlt/#`) is handy for seeing the
+bus traffic directly.
+
+Useful mock options:
 
 ```bash
 just server mock --interval 60          # real firmware cadence (60 s)
@@ -42,14 +79,14 @@ just server mock --lightning-prob 0.5   # more frequent strikes for testing
 
 ## Files
 
+- `main.go`, `internal/` — the Go service (config, model, store, ingest, web).
 - `mosquitto/mosquitto.conf` — dev broker config (anonymous, port 1883).
-- `mock_publisher.py` — faithful stand-in for the ESP32 firmware.
-- `requirements.txt` — Python deps (paho-mqtt).
+- `mock_publisher.py`, `requirements.txt` — Python dev test fixture (not deployed).
 
 ## Production note
 
-The dev config allows anonymous connections for convenience. On the real Pi,
-disable anonymous access and require credentials:
+The dev broker config allows anonymous connections for convenience. On the real
+Pi, disable anonymous access and require credentials:
 
 ```conf
 allow_anonymous false
@@ -57,4 +94,8 @@ password_file /etc/mosquitto/passwd
 ```
 
 Create the password file with `mosquitto_passwd -c /etc/mosquitto/passwd wtwlt`,
-and set the matching `MQTT_USER`/`MQTT_PASS` in the firmware's `secrets.h`.
+set the matching `MQTT_USER`/`MQTT_PASS` in the firmware's `secrets.h`, and the
+matching `WTWLT_MQTT_USER`/`WTWLT_MQTT_PASS` for the Go service.
+
+Deployment (release binaries + a one-line install script with a systemd unit) is
+planned for later — see [`../SPEC.md`](../SPEC.md) §6.

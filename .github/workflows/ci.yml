@@ -65,3 +65,25 @@ jobs:
 
       - name: Compile firmware
         run: just firmware build
+
+  server:
+    name: Server (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - uses: extractions/setup-just@v3
+
+      - name: Vet
+        run: just server vet
+
+      - name: Test
+        run: just server test
+
+      - name: Build
+        run: just server build

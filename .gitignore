@@ -30,7 +30,12 @@ build/
 
 # Local data / databases (future: Pi)
 *.db
+*.db-wal
+*.db-shm
 *.duckdb
 *.sqlite
 *.sqlite3
 data/
+
+# Go server build artifact
+/server/wtwlt-server

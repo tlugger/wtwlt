@@ -2,16 +2,40 @@
 # Invoke from the repo root as `just server <recipe>`, or from server/ as `just <recipe>`.
 set shell := ["bash", "-uc"]
 
-# System python for the venv (the Homebrew python is broken on this machine).
+# System python for the mock-publisher venv (the Homebrew python is broken here).
 py := "/usr/bin/python3"
 
 # Show available recipes
 default:
     @just --list
 
-# One-time: create the Python venv and install deps (paho-mqtt)
+# --- Go service (ingest + DB + website/API) --------------------------------
+
+# Build the server binary (server/wtwlt-server)
+build:
+    cd {{source_directory()}} && go build -ldflags "-X main.version=$(git describe --tags --always 2>/dev/null || echo dev)" -o wtwlt-server .
+
+# Run the server locally (reads WTWLT_* env; defaults to localhost broker)
+run:
+    cd {{source_directory()}} && go run .
+
+# Run Go unit tests
+test:
+    cd {{source_directory()}} && go test ./...
+
+# Vet + tidy check
+vet:
+    cd {{source_directory()}} && go vet ./...
+
+# Update go.mod/go.sum
+tidy:
+    cd {{source_directory()}} && go mod tidy
+
+# --- Local broker + mock station (dev, no hardware) ------------------------
+
+# One-time: create the Python venv for the mock publisher (paho-mqtt)
 setup:
-    cd {{source_directory()}} && {{py}} -m venv .venv && .venv/bin/pip install -q --upgrade pip -r requirements.txt && echo "server venv ready (run: just server mock)"
+    cd {{source_directory()}} && {{py}} -m venv .venv && .venv/bin/pip install -q --upgrade pip -r requirements.txt && echo "mock-publisher venv ready (run: just server mock)"
 
 # Start the local Mosquitto broker in the foreground (Ctrl-C to stop).
 # Requires: brew install mosquitto
@@ -19,7 +43,6 @@ broker:
     cd {{source_directory()}} && mkdir -p data && mosquitto -c mosquitto/mosquitto.conf
 
 # Subscribe to all station topics (run in a second terminal).
-# Requires: brew install mosquitto
 watch:
     mosquitto_sub -h localhost -t 'wtwlt/#' -v
 
