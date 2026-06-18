@@ -23,6 +23,10 @@ run:
 test:
     cd {{source_directory()}} && go test ./...
 
+# Run Go unit tests with the race detector (used by CI)
+test-race:
+    cd {{source_directory()}} && go test -race ./...
+
 # Vet + tidy check
 vet:
     cd {{source_directory()}} && go vet ./...

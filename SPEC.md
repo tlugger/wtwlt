@@ -317,8 +317,11 @@ Lighter sketch; to be detailed when Phase 1 lands.
   writes while the HTTP goroutine reads. Historical analytics can use precomputed
   rollup tables. (RRDtool/VictoriaMetrics are separate services and DuckDB's Go
   driver needs cgo — all cut against the one-binary goal.) Confirm in Phase 2.
-- **Retention/rollups:** keep full-resolution recent data; downsample older data
-  (hourly/daily aggregates) for "rough historical look."
+- **Retention/rollups (implemented):** raw readings are downsampled into
+  `readings_hourly` / `readings_daily` tables (recomputed from raw on a 10-min
+  timer, idempotent). The history API serves `hour`/`day` buckets from these
+  (fast for long ranges; they survive raw pruning). Raw older than
+  `WTWLT_RETENTION_DAYS` (default 90; `0` = keep all) is pruned after rollup.
 - **Units:** stored metric; conversions applied at the API/display layer.
 
 ---
@@ -416,8 +419,8 @@ curl -fsSL https://raw.githubusercontent.com/tlugger/wtwlt/main/install.sh | sud
 - Bench-calibrate `vaneADCValues[16]` for the ESP32's 12-bit nonlinear ADC.
 - Soil moisture raw→% calibration endpoints.
 - ~~Phase 2: final DB choice~~ — **decided: SQLite** (`modernc.org/sqlite`,
-  cgo-free, WAL) embedded in the Go service. Rollup/downsample strategy for old
-  data still TBD.
+  cgo-free, WAL) embedded in the Go service. ~~Rollup/downsample strategy~~ —
+  **done**: hourly/daily rollup tables + retention prune (§4).
 - Multi-node support later? (`station_id` is already in the contract to allow it.)
 - Battery/solar sizing for continuous-awake operation.
 ```

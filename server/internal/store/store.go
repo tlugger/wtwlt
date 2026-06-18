@@ -62,6 +62,35 @@ CREATE TABLE IF NOT EXISTS station_status (
     boot_ts     TEXT,
     updated_at  TEXT NOT NULL
 );
+
+-- Downsampled rollups (recomputed from raw; survive raw pruning). bucket is the
+-- RFC3339 start of the hour/day. Same columns for both granularities.
+CREATE TABLE IF NOT EXISTS readings_hourly (
+    station_id    TEXT NOT NULL,
+    bucket        TEXT NOT NULL,
+    count         INTEGER NOT NULL,
+    temp_avg REAL, temp_min REAL, temp_max REAL,
+    humidity_avg REAL,
+    pressure_avg REAL, pressure_min REAL, pressure_max REAL,
+    uv_avg REAL, uv_max REAL,
+    wind_avg REAL, wind_gust_max REAL,
+    rain_sum REAL,
+    soil_avg REAL,
+    PRIMARY KEY (station_id, bucket)
+);
+CREATE TABLE IF NOT EXISTS readings_daily (
+    station_id    TEXT NOT NULL,
+    bucket        TEXT NOT NULL,
+    count         INTEGER NOT NULL,
+    temp_avg REAL, temp_min REAL, temp_max REAL,
+    humidity_avg REAL,
+    pressure_avg REAL, pressure_min REAL, pressure_max REAL,
+    uv_avg REAL, uv_max REAL,
+    wind_avg REAL, wind_gust_max REAL,
+    rain_sum REAL,
+    soil_avg REAL,
+    PRIMARY KEY (station_id, bucket)
+);
 `
 
 // Open opens (and migrates) the SQLite database at path. Use ":memory:" for tests.
@@ -207,48 +236,59 @@ type HistoryBucket struct {
 	SoilPct     *float64
 }
 
-// bucketExpr returns a SQL expression that truncates the RFC3339 `ts` column to
-// the requested granularity using substr (robust across SQLite versions).
-func bucketExpr(bucket string) (string, error) {
+// History returns aggregated readings for [from,to). `raw` aggregates live raw
+// readings (one point per reading); `hour`/`day` read the precomputed rollup
+// tables (fast for long ranges, and they survive raw pruning).
+func (s *Store) History(stationID string, from, to time.Time, bucket string) ([]HistoryBucket, error) {
 	switch bucket {
 	case "", "raw":
-		return "ts", nil
+		return s.historyRaw(stationID, from, to)
 	case "hour":
-		return "substr(ts,1,13) || ':00:00Z'", nil
+		// floor `from` to the bucket start so a partially-covered first bucket is included
+		return s.historyRollup("readings_hourly", stationID, from.Truncate(time.Hour), to)
 	case "day":
-		return "substr(ts,1,10) || 'T00:00:00Z'", nil
+		return s.historyRollup("readings_daily", stationID, from.Truncate(24*time.Hour), to)
 	default:
-		return "", fmt.Errorf("invalid bucket %q (want raw|hour|day)", bucket)
+		return nil, fmt.Errorf("invalid bucket %q (want raw|hour|day)", bucket)
 	}
 }
 
-// History returns aggregated readings for [from,to) bucketed by granularity.
-func (s *Store) History(stationID string, from, to time.Time, bucket string) ([]HistoryBucket, error) {
-	expr, err := bucketExpr(bucket)
-	if err != nil {
-		return nil, err
-	}
-	q := fmt.Sprintf(`
-		SELECT %s AS bucket, COUNT(*),
+func (s *Store) historyRaw(stationID string, from, to time.Time) ([]HistoryBucket, error) {
+	rows, err := s.db.Query(`
+		SELECT ts AS bucket, COUNT(*),
 		       AVG(temp_c), AVG(humidity_pct), AVG(pressure_hpa), AVG(uv_index),
 		       AVG(wind_avg_mps), MAX(wind_gust_mps), SUM(rain_mm), AVG(soil_moisture_pct)
-		FROM readings
-		WHERE station_id=? AND ts>=? AND ts<?
-		GROUP BY bucket ORDER BY bucket`, expr)
-
-	rows, err := s.db.Query(q, stationID, isoUTC(from), isoUTC(to))
+		FROM readings WHERE station_id=? AND ts>=? AND ts<?
+		GROUP BY bucket ORDER BY bucket`, stationID, isoUTC(from), isoUTC(to))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	return scanHistory(rows)
+}
 
+func (s *Store) historyRollup(table, stationID string, from, to time.Time) ([]HistoryBucket, error) {
+	rows, err := s.db.Query(fmt.Sprintf(`
+		SELECT bucket, count, temp_avg, humidity_avg, pressure_avg, uv_avg,
+		       wind_avg, wind_gust_max, rain_sum, soil_avg
+		FROM %s WHERE station_id=? AND bucket>=? AND bucket<? ORDER BY bucket`, table),
+		stationID, isoUTC(from), isoUTC(to))
+	if err != nil {
+		return nil, err
+	}
+	return scanHistory(rows)
+}
+
+// scanHistory reads rows of (bucket, count, temp, humidity, pressure, uv,
+// wind_avg, wind_gust, rain, soil) — the column order shared by both queries.
+func scanHistory(rows *sql.Rows) ([]HistoryBucket, error) {
+	defer rows.Close()
 	var out []HistoryBucket
 	for rows.Next() {
 		var (
-			b                                       HistoryBucket
-			bucketS                                 string
-			temp, hum, pres, uv, wavg, wgust, soil  sql.NullFloat64
-			rain                                    sql.NullFloat64
+			b                                      HistoryBucket
+			bucketS                                string
+			temp, hum, pres, uv, wavg, wgust, soil sql.NullFloat64
+			rain                                   sql.NullFloat64
 		)
 		if err := rows.Scan(&bucketS, &b.Count, &temp, &hum, &pres, &uv, &wavg, &wgust, &rain, &soil); err != nil {
 			return nil, err
@@ -262,6 +302,43 @@ func (s *Store) History(stationID string, from, to time.Time, bucket string) ([]
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+// RollupHourly recomputes hourly rollups for every raw reading at/after `since`.
+// Idempotent (INSERT OR REPLACE keyed on station+bucket), so safe to run often
+// and it absorbs late-arriving data.
+func (s *Store) RollupHourly(since time.Time) error {
+	return s.rollup("readings_hourly", "substr(ts,1,13) || ':00:00Z'", since)
+}
+
+// RollupDaily recomputes daily rollups for every raw reading at/after `since`.
+func (s *Store) RollupDaily(since time.Time) error {
+	return s.rollup("readings_daily", "substr(ts,1,10) || 'T00:00:00Z'", since)
+}
+
+func (s *Store) rollup(table, bucketExpr string, since time.Time) error {
+	_, err := s.db.Exec(fmt.Sprintf(`
+		INSERT OR REPLACE INTO %s
+			(station_id, bucket, count, temp_avg, temp_min, temp_max, humidity_avg,
+			 pressure_avg, pressure_min, pressure_max, uv_avg, uv_max,
+			 wind_avg, wind_gust_max, rain_sum, soil_avg)
+		SELECT station_id, %s AS bucket, COUNT(*),
+		       AVG(temp_c), MIN(temp_c), MAX(temp_c), AVG(humidity_pct),
+		       AVG(pressure_hpa), MIN(pressure_hpa), MAX(pressure_hpa), AVG(uv_index), MAX(uv_index),
+		       AVG(wind_avg_mps), MAX(wind_gust_mps), SUM(rain_mm), AVG(soil_moisture_pct)
+		FROM readings WHERE ts >= ?
+		GROUP BY station_id, bucket`, table, bucketExpr), isoUTC(since))
+	return err
+}
+
+// PruneRaw deletes raw readings older than `before`, returning the row count.
+// Call only after rollups covering that range have been computed.
+func (s *Store) PruneRaw(before time.Time) (int64, error) {
+	res, err := s.db.Exec(`DELETE FROM readings WHERE ts < ?`, isoUTC(before))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // Summary is min/max/avg statistics over a time range.

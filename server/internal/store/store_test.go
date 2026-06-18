@@ -119,6 +119,13 @@ func TestHistoryBucketing(t *testing.T) {
 	from := base.Add(-time.Hour)
 	to := base.Add(3 * time.Hour)
 
+	if err := s.RollupHourly(from); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RollupDaily(from); err != nil {
+		t.Fatal(err)
+	}
+
 	hourly, err := s.History("wtwlt-01", from, to, "hour")
 	if err != nil {
 		t.Fatalf("History hour: %v", err)
@@ -158,6 +165,65 @@ func TestHistoryInvalidBucket(t *testing.T) {
 	s := newTestStore(t)
 	if _, err := s.History("wtwlt-01", time.Time{}, time.Now(), "week"); err == nil {
 		t.Fatal("expected error for invalid bucket")
+	}
+}
+
+func TestRollupSurvivesPrune(t *testing.T) {
+	s := newTestStore(t)
+	old := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	seedReading(t, s, "wtwlt-01", old, 10.0, 3.0, 0.1)
+	seedReading(t, s, "wtwlt-01", old.Add(20*time.Minute), 14.0, 7.0, 0.2)
+
+	if err := s.RollupHourly(old.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RollupDaily(old.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := s.PruneRaw(old.Add(24 * time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("pruned %d, want 2", n)
+	}
+
+	// raw is gone...
+	if raw, _ := s.History("wtwlt-01", old.Add(-time.Hour), old.Add(2*time.Hour), "raw"); len(raw) != 0 {
+		t.Errorf("expected raw pruned, got %d rows", len(raw))
+	}
+	// ...but the hourly rollup remains with correct aggregates
+	hourly, err := s.History("wtwlt-01", old.Add(-time.Hour), old.Add(2*time.Hour), "hour")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hourly) != 1 || hourly[0].Count != 2 {
+		t.Fatalf("hourly = %+v", hourly)
+	}
+	if hourly[0].TempC == nil || *hourly[0].TempC != 12.0 {
+		t.Errorf("avg temp = %v, want 12", hourly[0].TempC)
+	}
+	if hourly[0].WindGustMPS == nil || *hourly[0].WindGustMPS != 7.0 {
+		t.Errorf("max gust = %v, want 7", hourly[0].WindGustMPS)
+	}
+	if diff := hourly[0].RainMM - 0.3; diff < -1e-9 || diff > 1e-9 {
+		t.Errorf("rain sum = %v, want 0.3", hourly[0].RainMM)
+	}
+}
+
+func TestRollupIdempotent(t *testing.T) {
+	s := newTestStore(t)
+	base := time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC)
+	seedReading(t, s, "wtwlt-01", base, 20.0, 5.0, 0.2)
+	for i := 0; i < 3; i++ {
+		if err := s.RollupHourly(base.Add(-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hourly, _ := s.History("wtwlt-01", base.Add(-time.Hour), base.Add(time.Hour), "hour")
+	if len(hourly) != 1 {
+		t.Fatalf("idempotent rollup produced %d rows, want 1", len(hourly))
 	}
 }
 

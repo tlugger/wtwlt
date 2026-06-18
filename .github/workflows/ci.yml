@@ -82,8 +82,8 @@ jobs:
       - name: Vet
         run: just server vet
 
-      - name: Test
-        run: just server test
+      - name: Test (with race detector)
+        run: just server test-race
 
       - name: Build
         run: just server build

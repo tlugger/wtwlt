@@ -180,6 +180,9 @@ func seedHistory(t *testing.T, st *store.Store) {
 func TestHistoryHourly(t *testing.T) {
 	st, h := newServer(t)
 	seedHistory(t, st)
+	if err := st.RollupHourly(ts("2026-06-16T00:00:00Z")); err != nil { // hour/day read rollups
+		t.Fatal(err)
+	}
 
 	rr := do(t, h, "/api/history?bucket=hour&from=2026-06-16T11:00:00Z&to=2026-06-16T14:00:00Z")
 	if rr.Code != 200 {

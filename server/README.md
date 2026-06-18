@@ -29,6 +29,13 @@ SQLite (WAL mode), and an HTTP server goroutine that reads from it.
 | `WTWLT_MQTT_USER` / `WTWLT_MQTT_PASS` | _(empty)_ | broker auth (if enabled) |
 | `WTWLT_HTTP_ADDR` | `:8080` | HTTP listen address |
 | `WTWLT_DB_PATH` | `./wtwlt.db` | SQLite file (or `$WTWLT_DATA_DIR/wtwlt.db`) |
+| `WTWLT_RETENTION_DAYS` | `90` | prune raw readings older than this (`0` = keep all) |
+
+**Rollups & retention:** every 10 minutes the service recomputes hourly/daily
+aggregates from raw into `readings_hourly` / `readings_daily`, then prunes raw
+older than `WTWLT_RETENTION_DAYS`. The `/api/history` `hour` and `day` buckets
+read these rollup tables, so long-range charts stay fast and survive pruning
+(`raw` reads live readings). Keep retention ≥ your longest raw-resolution view.
 
 **HTTP endpoints:**
 

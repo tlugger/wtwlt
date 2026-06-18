@@ -45,6 +45,37 @@ func main() {
 	}
 	defer ing.Stop()
 
+	// Rollups + retention: recompute hourly/daily aggregates from raw and prune
+	// raw older than the retention window. Idempotent; runs on a timer.
+	runMaintenance := func() {
+		now := time.Now().UTC()
+		if err := st.RollupHourly(now.AddDate(0, 0, -9)); err != nil {
+			log.Printf("maintenance: rollup hourly: %v", err)
+		}
+		dailySince := now.AddDate(0, 0, -3650) // ~all raw when retention is disabled
+		if cfg.RetentionDays > 0 {
+			dailySince = now.AddDate(0, 0, -(cfg.RetentionDays + 2))
+		}
+		if err := st.RollupDaily(dailySince); err != nil {
+			log.Printf("maintenance: rollup daily: %v", err)
+		}
+		if cfg.RetentionDays > 0 {
+			if n, err := st.PruneRaw(now.AddDate(0, 0, -cfg.RetentionDays)); err != nil {
+				log.Printf("maintenance: prune raw: %v", err)
+			} else if n > 0 {
+				log.Printf("maintenance: pruned %d raw readings older than %dd", n, cfg.RetentionDays)
+			}
+		}
+	}
+	runMaintenance() // populate rollups on startup
+	go func() {
+		t := time.NewTicker(10 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			runMaintenance()
+		}
+	}()
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           web.New(st).Handler(),
