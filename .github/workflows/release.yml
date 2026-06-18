@@ -1,0 +1,77 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to release from
+        required: true
+        type: string
+        default: main
+      version:
+        description: Version tag (e.g. v0.1.0)
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Test
+        working-directory: server
+        run: go test ./...
+
+      - name: Build linux/arm64
+        working-directory: server
+        env: { GOOS: linux, GOARCH: arm64 }
+        run: go build -trimpath -ldflags "-s -w -X main.version=${{ inputs.version }}" -o ../wtwlt-server-linux-arm64 .
+
+      - name: Build linux/amd64
+        working-directory: server
+        env: { GOOS: linux, GOARCH: amd64 }
+        run: go build -trimpath -ldflags "-s -w -X main.version=${{ inputs.version }}" -o ../wtwlt-server-linux-amd64 .
+
+      - name: Build linux/arm
+        working-directory: server
+        env: { GOOS: linux, GOARCH: arm, GOARM: "6" }
+        run: go build -trimpath -ldflags "-s -w -X main.version=${{ inputs.version }}" -o ../wtwlt-server-linux-arm .
+
+      - name: Checksums
+        run: |
+          for f in wtwlt-server-linux-arm64 wtwlt-server-linux-amd64 wtwlt-server-linux-arm; do
+            sha256sum "$f" > "$f.sha256"
+          done
+
+      - name: Replace existing tag
+        run: |
+          git tag -d ${{ inputs.version }} || true
+          git push --delete origin ${{ inputs.version }} || true
+          git tag ${{ inputs.version }}
+          git push origin ${{ inputs.version }}
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          generate_release_notes: true
+          files: |
+            wtwlt-server-linux-arm64
+            wtwlt-server-linux-arm64.sha256
+            wtwlt-server-linux-amd64
+            wtwlt-server-linux-amd64.sha256
+            wtwlt-server-linux-arm
+            wtwlt-server-linux-arm.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

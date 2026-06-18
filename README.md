@@ -56,3 +56,17 @@ Then open the dashboard at <http://localhost:8080/> (earth-toned, theme shifts
 with time of day + conditions), or `curl localhost:8080/api/current`.
 
 Details in [`server/README.md`](server/README.md).
+
+## Deploy to the Raspberry Pi
+
+Cut a release from the GitHub **Actions → release** workflow (it cross-compiles
+the server for `linux/arm64·amd64·arm` and publishes a GitHub Release). Then, on
+the Pi:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tlugger/wtwlt/main/install.sh | sudo bash
+```
+
+The installer picks the right binary for the Pi's architecture, installs a
+`systemd` service, and starts it. Re-running it upgrades in place. Config lives
+in `/home/pi/wtwlt/.env`. See [`SPEC.md`](SPEC.md) §6 for details.

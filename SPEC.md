@@ -378,10 +378,10 @@ earthy family:
 
 ---
 
-## 6. Release & Deployment (build LAST — reference plan)
+## 6. Release & Deployment (implemented)
 
-> Deferred until the Go service is functional. Captured here so it isn't lost.
-> Pattern proven across other projects (adapted from `tlugger/rockiscope`).
+> Built — `.github/workflows/release.yml` + `install.sh`. Pattern adapted from
+> `tlugger/rockiscope`.
 
 **Goal:** install/update the Pi service with one piped command:
 
@@ -401,8 +401,8 @@ curl -fsSL https://raw.githubusercontent.com/tlugger/wtwlt/main/install.sh | sud
 - Detect arch (`uname -m` → arm64/arm/amd64); stop the running service first.
 - Download the latest release binary matching the arch; **fallback to building
   from source** (`git clone` + `go build` in `server/`) if no release/binary.
-- Install to `/home/pi/wtwlt/wtwlt-server`; create `.env` (MQTT host/port/user/
-  pass, HTTP addr) if missing.
+- Install to `/home/pi/wtwlt/wtwlt-server` (override with `WTWLT_INSTALL_DIR`);
+  create `.env` (MQTT host/port/user/pass, HTTP addr, retention) if missing.
 - Write a `systemd` unit (`After=network-online.target mosquitto.service`,
   `Restart=always`, `EnvironmentFile=.env`, logs to the install dir),
   `daemon-reload`, `enable`, `(re)start`.

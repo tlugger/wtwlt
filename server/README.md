@@ -128,5 +128,17 @@ Create the password file with `mosquitto_passwd -c /etc/mosquitto/passwd wtwlt`,
 set the matching `MQTT_USER`/`MQTT_PASS` in the firmware's `secrets.h`, and the
 matching `WTWLT_MQTT_USER`/`WTWLT_MQTT_PASS` for the Go service.
 
-Deployment (release binaries + a one-line install script with a systemd unit) is
-planned for later — see [`../SPEC.md`](../SPEC.md) §6.
+## Deployment
+
+Release binaries are cross-compiled by the GitHub **release** workflow
+(`.github/workflows/release.yml`, run manually with a version tag). On the Pi,
+install/update with one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tlugger/wtwlt/main/install.sh | sudo bash
+```
+
+`install.sh` downloads the right binary for the Pi's architecture (or builds from
+source as a fallback), writes `/home/pi/wtwlt/.env` and a `systemd` unit, and
+starts the `wtwlt` service. Re-running upgrades in place. See [`../SPEC.md`](../SPEC.md)
+§6.
