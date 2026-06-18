@@ -30,7 +30,7 @@
     --bg-top:#C97B5A; --bg-bottom:#5B4E7E;
     --ink:#F6EEE2; --ink-dim:rgba(246,238,226,0.62);
     --accent:#FFD07B; --accent-2:#E8DCC4;
-    --card-bg:rgba(0,0,0,0.18); --card-border:rgba(255,255,255,0.15);
+    --card-bg:rgba(0,0,0,0.27); --card-border:rgba(255,255,255,0.17);
     --grid:rgba(246,238,226,0.13);
   }
   [data-theme="night"] {
@@ -51,7 +51,7 @@
     --bg-top:#2B2F36; --bg-bottom:#191C21;
     --ink:#E8EAEE; --ink-dim:rgba(232,234,238,0.52);
     --accent:#FFC857; --accent-2:#8A93A0;
-    --card-bg:rgba(255,255,255,0.045); --card-border:rgba(255,255,255,0.085);
+    --card-bg:rgba(255,255,255,0.07); --card-border:rgba(255,255,255,0.11);
     --grid:rgba(232,234,238,0.10);
   }
 
@@ -60,8 +60,10 @@
     font-family:'Inter',system-ui,-apple-system,sans-serif;
     background:linear-gradient(170deg,var(--bg-top) 0%,var(--bg-bottom) 100%);
     background-attachment:fixed; color:var(--ink); min-height:100vh; padding:24px;
+    overflow-x:hidden;
     transition:background 1.2s ease, color 0.6s ease;
   }
+  canvas { max-width:100%; }
   h1,h2,h3,.value,.big { font-family:'Raleway',sans-serif; }
 
   .wrap { max-width:1180px; margin:0 auto; }
@@ -86,25 +88,37 @@
   .card, .panel { background:var(--card-bg); border:1px solid var(--card-border); border-radius:16px; }
   .panel { padding:20px; overflow:hidden; min-width:0; }
   .panel h2 { font-size:13px; font-weight:600; color:var(--accent); text-transform:uppercase; letter-spacing:1.2px; margin-bottom:14px; }
+  .panel-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+  .panel-head h2 { margin-bottom:0; }
+  .metric-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+  .mtab { font-size:11px; font-weight:600; padding:4px 11px; border-radius:14px; border:1px solid var(--card-border); color:var(--ink-dim); cursor:pointer; transition:all .15s; }
+  .mtab:hover { color:var(--ink); }
+  .mtab.active { background:var(--accent); border-color:var(--accent); color:var(--bg-bottom); }
 
   /* hero */
   .hero { display:grid; grid-template-columns:minmax(220px,1fr) 2fr; gap:16px; margin-bottom:16px; }
-  .now { padding:24px; display:flex; flex-direction:column; justify-content:center; gap:6px; }
+  .now { padding:24px; display:flex; flex-direction:column; justify-content:center; gap:6px; min-width:0; }
   .now .glyph { font-size:52px; line-height:1; }
   .now .big { font-size:64px; font-weight:700; line-height:1; }
   .now .cond { color:var(--ink-dim); font-size:15px; }
   .now .updated { color:var(--ink-dim); font-size:12px; margin-top:6px; }
   .tiles { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
-  .tile { background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:16px; }
+  .tile { background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:16px; min-width:0; overflow:hidden; }
   .tile .label { font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-dim); }
-  .tile .value { font-size:24px; font-weight:700; margin-top:4px; }
+  .tile .value { font-size:24px; font-weight:700; margin-top:4px; overflow-wrap:anywhere; }
   .tile .sub { font-size:12px; color:var(--ink-dim); margin-top:2px; }
-  .compass { display:inline-block; transition:transform .6s ease; }
+
+  /* wind compass */
+  .wind-row { display:flex; align-items:center; gap:12px; }
+  .wind-row > div { min-width:0; }
+  .compass-svg { flex:0 0 auto; }
+  .compass-svg .card-letter { fill:var(--ink-dim); font-size:13px; text-anchor:middle; dominant-baseline:middle; font-family:'Inter',sans-serif; }
+  .compass-needle { transform-box:fill-box; transform-origin:50% 50%; transition:transform .6s ease; }
 
   /* summary stat row */
   .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
-  .stat { padding:18px; text-align:center; }
-  .stat .value { font-size:28px; font-weight:700; color:var(--accent-2); }
+  .stat { padding:18px; text-align:center; min-width:0; }
+  .stat .value { font-size:28px; font-weight:700; color:var(--accent-2); overflow-wrap:anywhere; }
   .stat .label { font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-dim); margin-top:4px; }
 
   /* range chips */
@@ -134,10 +148,25 @@
     .brand h1 { font-size:24px; }
     .hero { grid-template-columns:1fr; }
     .stats { grid-template-columns:1fr 1fr; }
+    .stat { padding:14px; }
+    .stat .value { font-size:22px; }
     .grid { grid-template-columns:1fr; }
     .now .big { font-size:52px; }
     .tiles { grid-template-columns:repeat(2,1fr); }
     .chart-wrap { height:200px; }
+  }
+  @media (max-width:430px) {
+    .brand h1 { font-size:22px; }
+    .head-right { gap:10px; }
+    .now .big { font-size:46px; }
+    .now .glyph { font-size:44px; }
+    .stat .value { font-size:20px; }
+    .tile .value { font-size:21px; }
+    .panel { padding:16px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body { transition:none; }
+    .compass-needle, .chip, .toggle button, .iconlink { transition:none; }
   }
 </style>
 </head>
@@ -149,10 +178,10 @@
       <p id="tagline">what's the weather like today?</p>
     </div>
     <div class="head-right">
-      <div class="status" id="status"><span class="led"></span><span id="statusText">connecting…</span></div>
-      <div class="toggle" id="unitToggle">
-        <button data-u="metric">°C</button>
-        <button data-u="imperial">°F</button>
+      <div class="status" id="status"><span class="led" aria-hidden="true"></span><span id="statusText" aria-live="polite">connecting…</span></div>
+      <div class="toggle" id="unitToggle" role="group" aria-label="Units">
+        <button data-u="metric" aria-label="Celsius">°C</button>
+        <button data-u="imperial" aria-label="Fahrenheit">°F</button>
       </div>
       <a class="iconlink" id="sourceLink" href="https://github.com/tlugger/wtwlt" target="_blank" rel="noopener" title="Source on GitHub" aria-label="GitHub">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2 0-.4-.5-1.6.2-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.7 18 5 18 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z"/></svg>
@@ -181,10 +210,21 @@
 
   <!-- Charts -->
   <section class="grid">
-    <div class="panel wide"><h2 id="tempTitle">Temperature</h2><div class="chart-wrap"><canvas id="tempChart"></canvas></div></div>
-    <div class="panel"><h2>Wind — avg &amp; gust</h2><div class="chart-wrap"><canvas id="windChart"></canvas></div></div>
-    <div class="panel"><h2>Rain</h2><div class="chart-wrap"><canvas id="rainChart"></canvas></div></div>
-    <div class="panel wide"><h2>Humidity &amp; Pressure</h2><div class="chart-wrap"><canvas id="hpChart"></canvas></div></div>
+    <div class="panel wide">
+      <div class="panel-head">
+        <h2 id="mainTitle">Temperature</h2>
+        <div class="metric-tabs" id="metricTabs" role="group" aria-label="Chart metric">
+          <span class="mtab active" data-m="temp" role="button" tabindex="0">Temp</span>
+          <span class="mtab" data-m="uv" role="button" tabindex="0">UV</span>
+          <span class="mtab" data-m="humidity" role="button" tabindex="0">Humidity</span>
+          <span class="mtab" data-m="pressure" role="button" tabindex="0">Pressure</span>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="mainChart" role="img" aria-label="Selected weather metric over time"></canvas></div>
+    </div>
+    <div class="panel"><h2>Wind — avg &amp; gust</h2><div class="chart-wrap"><canvas id="windChart" role="img" aria-label="Wind speed average and gust over time"></canvas></div></div>
+    <div class="panel"><h2>Rain</h2><div class="chart-wrap"><canvas id="rainChart" role="img" aria-label="Rainfall over time"></canvas></div></div>
+    <div class="panel wide"><h2>Humidity &amp; Pressure</h2><div class="chart-wrap"><canvas id="hpChart" role="img" aria-label="Humidity and pressure over time"></canvas></div></div>
   </section>
 
   <!-- Lightning -->
@@ -200,12 +240,25 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const STATION = "wtwlt-01";
+const LOC = { lat: 39.74, lon: -104.99 }; // default Denver; ?lat=&lon= overrides
 
 const state = {
   units: localStorage.getItem("wtwlt-units") || "metric",
   range: "24h",
   recentLightning: false,
   rainingNow: false,
+  theme: null,
+  themeOverride: null,   // ?theme=clear-day|dusk|night|rain|storm pins the look
+  mainMetric: "temp",    // which metric the lead chart shows
+  history: null,         // cached {pts, units} so metric switches don't refetch
+};
+
+// the toggle-able lead chart: each metric maps to history fields + colours
+const MAIN_METRICS = {
+  temp:     { label:"Temperature", unit:"temp",     fill:true,  series:[{key:"temp",      label:"Temp",     color:"#C97B5A"}] },
+  uv:       { label:"UV Index",    unit:"uv",       fill:true,  series:[{key:"uv",        label:"UV Index", color:"#D9A441"}] },
+  humidity: { label:"Humidity",    unit:"humidity", fill:true,  series:[{key:"humidity",  label:"Humidity", color:"#6B8E9E"}] },
+  pressure: { label:"Pressure",    unit:"pressure", fill:false, series:[{key:"pressure",  label:"Pressure", color:"#9C8AA8"}] },
 };
 
 const RANGES = {
@@ -234,36 +287,51 @@ function rangeParams() {
 }
 
 /* ── theming ─────────────────────────────────────────────────────── */
-function timeOfDay(d = new Date()) {
-  const h = d.getHours();
-  if (h >= 7 && h < 18) return "day";
-  if ((h >= 18 && h < 20) || (h >= 5 && h < 7)) return "dusk";
-  return "night";
+// sunrise/sunset (trimmed SunCalc, MIT) so day/dusk/night tracks real golden hour
+const sunTimes = (() => {
+  const rad=Math.PI/180, dayMs=864e5, J1970=2440588, J2000=2451545, e=rad*23.4397, J0=0.0009;
+  const toDays = d => d.valueOf()/dayMs - 0.5 + J1970 - J2000;
+  const fromJ = j => new Date((j + 0.5 - J1970)*dayMs);
+  const sma = d => rad*(357.5291 + 0.98560028*d);
+  const ecl = M => M + rad*(1.9148*Math.sin(M)+0.02*Math.sin(2*M)+0.0003*Math.sin(3*M)) + rad*102.9372 + Math.PI;
+  const dec = L => Math.asin(Math.sin(e)*Math.sin(L));
+  const transit = (Ht,lw,n) => J0 + (Ht+lw)/(2*Math.PI) + n;
+  const stJ = (ds,M,L) => J2000 + ds + 0.0053*Math.sin(M) - 0.0069*Math.sin(2*L);
+  const ha = (h,phi,d) => Math.acos((Math.sin(h)-Math.sin(phi)*Math.sin(d))/(Math.cos(phi)*Math.cos(d)));
+  return (date, lat, lng) => {
+    const lw=rad*-lng, phi=rad*lat, d=toDays(date);
+    const n=Math.round(d - J0 - lw/(2*Math.PI));
+    const ds=transit(0,lw,n), M=sma(ds), L=ecl(M), de=dec(L);
+    const Jset=stJ(transit(ha(-0.833*rad,phi,de),lw,n),M,L), Jnoon=stJ(ds,M,L);
+    return { sunrise: fromJ(Jnoon-(Jset-Jnoon)), sunset: fromJ(Jset) };
+  };
+})();
+function timeOfDay(now = new Date()) {
+  let t; try { t = sunTimes(now, LOC.lat, LOC.lon); } catch (e) {}
+  if (!t || isNaN(t.sunrise) || isNaN(t.sunset)) {  // polar day/night or bad input
+    const h = now.getHours();
+    return h>=7&&h<18 ? "day" : ((h>=18&&h<20)||(h>=5&&h<7)) ? "dusk" : "night";
+  }
+  const m=6e4, sr=t.sunrise.getTime(), ss=t.sunset.getTime(), x=now.getTime();
+  if (x < sr-45*m || x > ss+45*m) return "night";
+  if (x < sr+15*m || x > ss-15*m) return "dusk";
+  return "day";
 }
 function pickTheme() {
+  if (state.themeOverride) return state.themeOverride;
   if (state.recentLightning) return "storm";
   if (state.rainingNow) return "rain";
   const tod = timeOfDay();
   return tod === "day" ? "clear-day" : tod === "dusk" ? "dusk" : "night";
 }
+const GLYPH = { "clear-day":"☀️", dusk:"🌆", night:"🌙", rain:"🌧️", storm:"⛈️" };
+const WORD  = { "clear-day":"clear skies", dusk:"golden hour", night:"quiet night", rain:"rain falling", storm:"storms overhead" };
 function applyTheme() {
   const t = pickTheme();
-  if (document.documentElement.getAttribute("data-theme") !== t) {
-    document.documentElement.setAttribute("data-theme", t);
-    applyChartTheme();
-  }
-}
-function conditionGlyph() {
-  if (state.recentLightning) return "⛈️";
-  if (state.rainingNow) return "🌧️";
-  const tod = timeOfDay();
-  return tod === "day" ? "☀️" : tod === "dusk" ? "🌆" : "🌙";
-}
-function conditionWord() {
-  if (state.recentLightning) return "storms overhead";
-  if (state.rainingNow) return "rain falling";
-  const tod = timeOfDay();
-  return tod === "day" ? "clear skies" : tod === "dusk" ? "golden hour" : "quiet night";
+  document.documentElement.setAttribute("data-theme", t);
+  $("nowGlyph").textContent = GLYPH[t] || "⛅";
+  $("nowCond").textContent = WORD[t] || "";
+  if (state.theme !== t) { state.theme = t; applyChartTheme(); }
 }
 
 /* ── current conditions ──────────────────────────────────────────── */
@@ -275,17 +343,14 @@ async function loadCurrent() {
   state.rainingNow = (c.rain || 0) > 0;
   const u = c.units;
   $("nowTemp").textContent = c.temp == null ? "—" : `${fmtNum(c.temp)}°`;
-  $("nowGlyph").textContent = conditionGlyph();
-  $("nowCond").textContent = conditionWord();
 
   const age = Date.now() - new Date(c.ts).getTime();
   const online = age < 5*60e3; // stale after 5 min
   setStatus(online, online ? `updated ${relTime(c.ts)}` : `last seen ${relTime(c.ts)}`);
   $("nowUpdated").textContent = `${u.temp} · ${state.units}`;
 
-  const arrow = `<span class="compass" style="transform:rotate(${c.wind.dir_deg}deg)">↑</span>`;
   $("tiles").innerHTML = [
-    tile("Wind", `${fmtNum(c.wind.avg)} ${u.speed}`, `gust ${fmtNum(c.wind.gust)} · ${arrow} ${c.wind.dir_cardinal}`),
+    windTile(c, u),
     tile("Humidity", `${fmtNum(c.humidity)}${u.humidity}`, ""),
     tile("Pressure", `${fmtNum(c.pressure)}`, u.pressure),
     tile("Rain (1m)", `${fmtNum(c.rain,2)}`, u.rain),
@@ -297,6 +362,23 @@ async function loadCurrent() {
 }
 function tile(label, value, sub) {
   return `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub||"&nbsp;"}</div></div>`;
+}
+function windTile(c, u) {
+  return `<div class="tile"><div class="label">Wind</div><div class="wind-row">${compassSVG(c.wind.dir_deg, c.wind.dir_cardinal)}` +
+    `<div><div class="value">${fmtNum(c.wind.avg)} ${u.speed}</div>` +
+    `<div class="sub">gust ${fmtNum(c.wind.gust)} · ${c.wind.dir_cardinal}</div></div></div></div>`;
+}
+// Arrow points to the bearing the wind blows FROM (the vane reading).
+function compassSVG(deg, card) {
+  return `<svg class="compass-svg" viewBox="0 0 100 100" width="58" height="58" role="img" aria-label="Wind from ${card}, ${Math.round(deg)} degrees">
+    <circle cx="50" cy="50" r="45" fill="none" stroke="var(--card-border)" stroke-width="3"/>
+    <text class="card-letter" x="50" y="13">N</text><text class="card-letter" x="88" y="51">E</text>
+    <text class="card-letter" x="50" y="90">S</text><text class="card-letter" x="12" y="51">W</text>
+    <g class="compass-needle" style="transform:rotate(${deg}deg)">
+      <polygon points="50,18 43,52 50,45 57,52" fill="var(--accent-2)"/>
+      <polygon points="50,82 43,52 50,59 57,52" fill="var(--ink-dim)"/>
+    </g>
+  </svg>`;
 }
 function uvWord(uv) {
   if (uv == null) return "";
@@ -345,20 +427,38 @@ async function loadLightning() {
 
   const el = $("bolts");
   if (events.length === 0) { el.innerHTML = `<div class="empty">no strikes — calm skies ⛅</div>`; applyTheme(); return; }
-  el.innerHTML = events.map(e =>
+  const shown = events.slice(0, 8);
+  el.innerHTML = shown.map(e =>
     `<div class="bolt"><span class="b-ico">⚡</span><span class="b-dist">${fmtNum(e.distance)} ${data.units.distance}</span>` +
     `<span>${e.event}</span><span class="b-time">${relTime(e.ts)}</span></div>`
-  ).join("");
+  ).join("") + (events.length > 8 ? `<div class="empty">+${events.length - 8} more</div>` : "");
   applyTheme();
 }
 
 /* ── charts ──────────────────────────────────────────────────────── */
 let charts = {};
+let lastIso = [];   // full timestamps for the current chart x-axis (for tooltips)
+
+function tipTitle(items) {
+  const iso = lastIso[items[0].dataIndex];
+  return iso ? new Date(iso).toLocaleString([], {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"}) : items[0].label;
+}
+function tipLabel(ctx) {
+  return `${ctx.dataset.label}: ${ctx.formattedValue}${ctx.dataset.unit ? " " + ctx.dataset.unit : ""}`;
+}
 function baseOpts() {
   return {
     responsive:true, maintainAspectRatio:false,
     interaction:{ mode:"index", intersect:false },
-    plugins:{ legend:{ labels:{ color:cssVar("--ink-dim"), font:{size:11}, usePointStyle:true } } },
+    plugins:{
+      legend:{ labels:{ color:cssVar("--ink-dim"), font:{size:11}, usePointStyle:true } },
+      tooltip:{
+        backgroundColor:cssVar("--bg-bottom"), borderColor:cssVar("--accent"), borderWidth:1,
+        titleColor:cssVar("--accent"), bodyColor:cssVar("--ink"),
+        cornerRadius:8, padding:10, usePointStyle:true,
+        callbacks:{ title:tipTitle, label:tipLabel },
+      },
+    },
     scales:{
       x:{ ticks:{ color:cssVar("--ink-dim"), font:{size:10}, maxRotation:0, autoSkip:true, maxTicksLimit:8 }, grid:{ color:cssVar("--grid") } },
       y:{ ticks:{ color:cssVar("--ink-dim"), font:{size:10} }, grid:{ color:cssVar("--grid") } },
@@ -378,16 +478,20 @@ function ds(label, color, yAxis) {
            tension:0.3, pointRadius:0, pointHoverRadius:4, fill:false, yAxisID:yAxis||"y" };
 }
 function initCharts() {
-  line("tempChart", [ds("Temp", SERIES.temp)]);
-  charts.tempChart.data.datasets[0].fill = true;
+  line("mainChart", [ds("Temp", MAIN_METRICS.temp.series[0].color)]);
+  charts.mainChart.data.datasets[0].fill = true;
+  charts.mainChart.options.plugins.legend.display = false;   // single series — no legend
   line("windChart", [ds("Avg", SERIES.wind), ds("Gust", SERIES.gust)]);
   bar("rainChart", [{ label:"Rain", data:[], backgroundColor:SERIES.rain+"cc", borderColor:SERIES.rain, borderWidth:1 }]);
+  charts.rainChart.options.plugins.legend.display = false;   // single series — no legend
   line("hpChart", [ds("Humidity", SERIES.humidity, "y"), ds("Pressure", SERIES.pressure, "y1")], true);
 }
 function applyChartTheme() {
   for (const c of Object.values(charts)) {
     if (!c) continue;
     c.options.plugins.legend.labels.color = cssVar("--ink-dim");
+    const tt = c.options.plugins.tooltip;
+    if (tt) { tt.backgroundColor = cssVar("--bg-bottom"); tt.borderColor = cssVar("--accent"); tt.titleColor = cssVar("--accent"); tt.bodyColor = cssVar("--ink"); }
     for (const ax of Object.values(c.options.scales)) {
       if (ax.ticks) ax.ticks.color = cssVar("--ink-dim");
       if (ax.grid && ax.grid.color !== undefined) ax.grid.color = cssVar("--grid");
@@ -409,12 +513,38 @@ async function loadHistory() {
   const pts = h.points || [];
   const labels = pts.map(p => bucketLabel(p.bucket));
   const u = h.units;
+  lastIso = pts.map(p => p.bucket);
+  state.history = { pts, units: u };
 
-  $("tempTitle").textContent = `Temperature (${u.temp})`;
-  set("tempChart", labels, [pts.map(p => p.temp)]);
+  // units for tooltips (lower grid)
+  charts.windChart.data.datasets[0].unit = u.speed;
+  charts.windChart.data.datasets[1].unit = u.speed;
+  charts.rainChart.data.datasets[0].unit = u.rain;
+  charts.hpChart.data.datasets[0].unit = u.humidity;
+  charts.hpChart.data.datasets[1].unit = u.pressure;
+
   set("windChart", labels, [pts.map(p => p.wind_avg), pts.map(p => p.wind_gust)]);
   set("rainChart", labels, [pts.map(p => p.rain)]);
   set("hpChart",   labels, [pts.map(p => p.humidity), pts.map(p => p.pressure)]);
+  renderMain();
+}
+
+// Render the toggle-able lead chart from cached history for the active metric.
+function renderMain() {
+  const h = state.history; if (!h) return;
+  const cfg = MAIN_METRICS[state.mainMetric] || MAIN_METRICS.temp;
+  const unit = h.units[cfg.unit];
+  const c = charts.mainChart;
+  c.data.labels = h.pts.map(p => bucketLabel(p.bucket));
+  c.data.datasets = cfg.series.map(s => {
+    const d = ds(s.label, s.color);
+    d.fill = cfg.fill && cfg.series.length === 1;
+    d.unit = unit;
+    d.data = h.pts.map(p => p[s.key]);
+    return d;
+  });
+  $("mainTitle").textContent = `${cfg.label} (${unit})`;
+  c.update("none");
 }
 function set(id, labels, series) {
   const c = charts[id]; if (!c) return;
@@ -427,13 +557,22 @@ function set(id, labels, series) {
 function setUnits(u) {
   state.units = u;
   localStorage.setItem("wtwlt-units", u);
-  document.querySelectorAll("#unitToggle button").forEach(b => b.classList.toggle("active", b.dataset.u === u));
+  document.querySelectorAll("#unitToggle button").forEach(b => {
+    const on = b.dataset.u === u;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
   refreshAll();
 }
 function refreshLive() { loadCurrent(); loadSummary(); loadLightning(); if (state.range === "24h") loadHistory(); }
 function refreshAll()  { loadCurrent(); loadSummary(); loadLightning(); loadHistory(); }
 
 function init() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("theme")) state.themeOverride = params.get("theme");
+  if (params.get("metric") && MAIN_METRICS[params.get("metric")]) state.mainMetric = params.get("metric");
+  if (params.get("lat")) LOC.lat = parseFloat(params.get("lat"));
+  if (params.get("lon")) LOC.lon = parseFloat(params.get("lon"));
   initCharts();
   document.querySelectorAll("#unitToggle button").forEach(b => b.onclick = () => setUnits(b.dataset.u));
   document.querySelectorAll("#rangeChips .chip").forEach(chip => chip.onclick = () => {
@@ -441,6 +580,16 @@ function init() {
     document.querySelectorAll("#rangeChips .chip").forEach(c => c.classList.toggle("active", c === chip));
     loadSummary(); loadLightning(); loadHistory();
   });
+  document.querySelectorAll("#metricTabs .mtab").forEach(t => {
+    const pick = () => {
+      state.mainMetric = t.dataset.m;
+      document.querySelectorAll("#metricTabs .mtab").forEach(x => x.classList.toggle("active", x === t));
+      renderMain();
+    };
+    t.onclick = pick;
+    t.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
+  });
+  document.querySelectorAll("#metricTabs .mtab").forEach(x => x.classList.toggle("active", x.dataset.m === state.mainMetric));
   setUnits(state.units);             // sets toggle + triggers first full load
   applyTheme();
   setInterval(refreshLive, 60e3);    // live tiles refresh each minute

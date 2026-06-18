@@ -39,3 +39,6 @@ data/
 
 # Go server build artifact
 /server/wtwlt-server
+
+# Local screenshots for review (not committed until curated into docs/)
+/screenshots/

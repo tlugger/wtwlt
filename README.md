@@ -11,12 +11,19 @@ Currently the repo contains:
   publishes readings to an MQTT broker. Lightning strikes are published as they
   happen. Units on the wire are metric/SI.
 - **`server/`** — the Raspberry Pi backend: a single **Go service** that ingests
-  the station's MQTT messages into SQLite and serves a JSON API from the same
-  binary. Ships with a local Mosquitto config and a Python mock publisher so the
-  whole pipeline can be exercised before the hardware exists.
+  the station's MQTT messages into SQLite and serves a live **dashboard** + JSON
+  API from the same binary. Ships with a local Mosquitto config and a Python mock
+  publisher so the whole pipeline can be exercised before the hardware exists.
 
 For the full system design — including the planned Raspberry Pi ingest, database,
 and public website — see [`SPEC.md`](SPEC.md).
+
+## Dashboard
+
+An earth-toned dashboard whose palette shifts with the time of day and live
+conditions (clear / dusk / night / rain / storm):
+
+![wtwlt dashboard shown in day, dusk, and night themes](docs/dashboard-themes.png)
 
 ## Build & flash the firmware
 
