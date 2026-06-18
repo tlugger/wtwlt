@@ -1,5 +1,5 @@
 // Package units converts stored metric/SI values to the requested display system.
-// Data is always stored metric (SPEC §2); conversion happens at the API layer.
+// Data is always stored metric; conversion happens at the API layer.
 package units
 
 import (

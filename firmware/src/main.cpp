@@ -1,6 +1,6 @@
 // main.cpp — wtwlt weather station entry point.
 //
-// Flow (see SPEC.md §3): sample sensors @1 Hz, aggregate over 60 s, publish one
+// Flow: sample sensors @1 Hz, aggregate over 60 s, publish one
 // readings message per window over MQTT. Lightning is event-driven. The node
 // stays awake continuously (solar + battery) and reconnects on WiFi/MQTT drops.
 #include <Arduino.h>

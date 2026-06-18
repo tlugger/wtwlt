@@ -1,4 +1,4 @@
-// payload.cpp — builds the JSON messages defined in SPEC.md §3.3.
+// payload.cpp — builds the MQTT JSON messages (contract in the README).
 #include "payload.h"
 #include "config.h"
 #include "secrets.h"

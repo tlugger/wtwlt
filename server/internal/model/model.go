@@ -1,4 +1,4 @@
-// Package model defines the MQTT message contract (SPEC.md §3.3) and parsing.
+// Package model defines the MQTT message contract (see the README) and parsing.
 //
 // Nullable sensor fields use *float64 so a JSON null (the firmware's NAN->null)
 // round-trips as a nil pointer rather than 0.
@@ -97,7 +97,7 @@ func ParseStatus(b []byte) (Status, error) {
 
 // EventTime returns the message timestamp parsed as UTC. If the firmware's `ts`
 // is missing or unparseable, it falls back to the supplied receive time (the
-// SPEC §3.3 ingest fallback) and reports ok=false.
+// ingest fallback) and reports ok=false.
 func EventTime(ts string, received time.Time) (t time.Time, ok bool) {
 	if ts == "" {
 		return received.UTC(), false

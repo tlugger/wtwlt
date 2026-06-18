@@ -1,4 +1,4 @@
-// Host-based tests for the MQTT JSON contract (SPEC.md §3.3).
+// Host-based tests for the MQTT JSON contract (see the README).
 // Builds each message, parses it back, and asserts field names / units / nulls.
 // Run with:  just firmware test   (or  pio test -e native)
 #include <unity.h>

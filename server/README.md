@@ -5,8 +5,9 @@ the station's MQTT messages into SQLite and serves the website/API from the same
 binary. This directory also holds a local Mosquitto config and a Python mock
 publisher for exercising the pipeline without hardware.
 
-Message shapes follow the firmware's MQTT contract in [`../SPEC.md`](../SPEC.md)
-§3.3 (metric/SI, wind in m/s, NAN→null, retained `status` + LWT).
+Message shapes follow the firmware's MQTT contract in the
+[top-level README](../README.md#mqtt-data-contract) (metric/SI, wind in m/s,
+NAN→null, retained `status` + LWT).
 
 ## The Go service
 
@@ -140,5 +141,4 @@ curl -fsSL https://raw.githubusercontent.com/tlugger/wtwlt/main/install.sh | sud
 
 `install.sh` downloads the right binary for the Pi's architecture (or builds from
 source as a fallback), writes `/home/pi/wtwlt/.env` and a `systemd` unit, and
-starts the `wtwlt` service. Re-running upgrades in place. See [`../SPEC.md`](../SPEC.md)
-§6.
+starts the `wtwlt` service. Re-running upgrades in place.

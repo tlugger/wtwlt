@@ -5,7 +5,8 @@ MicroMod Weather Carrier** that samples the sensor suite once a second,
 aggregates over 60 s, and publishes readings to MQTT. Lightning strikes are
 published as they happen. No vendor cloud — MQTT only.
 
-See [`../SPEC.md`](../SPEC.md) for the full design and the MQTT message contract.
+The architecture, pin map, and MQTT message contract are in the
+[top-level README](../README.md).
 
 ## Hardware
 
@@ -114,7 +115,8 @@ attached:
 - **aggregation** — wind averaging, gust, direction vector-averaging, rain
   deltas, cardinal mapping
 - **MQTT payload contract** — field names, metric→SI conversions, NAN→null for
-  absent sensors, and the lightning/status message shapes (SPEC §3.3)
+  absent sensors, and the lightning/status message shapes (see the data contract
+  in the [top-level README](../README.md#mqtt-data-contract))
 
 
 ```bash

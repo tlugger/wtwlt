@@ -2,8 +2,8 @@
 """Mock wtwlt weather station.
 
 Publishes readings / lightning / status messages over MQTT so the publish path
-(and the future ingest service) can be exercised before the ESP32 hardware
-exists. Message shapes mirror the firmware's MQTT contract in SPEC.md §3.3
+and the Go ingest service can be exercised before the ESP32 hardware exists.
+Message shapes mirror the firmware's MQTT contract (documented in the README)
 exactly: metric/SI units, wind in m/s, absent values omitted, a retained status
 message, and an LWT that flips the station offline on disconnect.
 
