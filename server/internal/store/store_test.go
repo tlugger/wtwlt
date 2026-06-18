@@ -92,3 +92,145 @@ func TestInsertLightning(t *testing.T) {
 		t.Fatalf("InsertLightning: %v", err)
 	}
 }
+
+// seed inserts a reading at ts with the given temp/gust/rain (other sensors nil).
+func seedReading(t *testing.T, s *Store, station string, ts time.Time, temp, gust, rain float64) {
+	t.Helper()
+	r := model.Reading{
+		StationID:   station,
+		Wind:        model.Wind{GustMPS: gust, DirCardinal: "N"},
+		RainMM:      rain,
+		TempC:       &temp,
+		Diagnostics: model.Diagnostics{FWVersion: "1.0.0"},
+	}
+	if err := s.InsertReading(r, ts, ts); err != nil {
+		t.Fatalf("seed reading: %v", err)
+	}
+}
+
+func TestHistoryBucketing(t *testing.T) {
+	s := newTestStore(t)
+	base := time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC)
+	// Two readings in hour 10, one in hour 11.
+	seedReading(t, s, "wtwlt-01", base, 20.0, 5.0, 0.2)
+	seedReading(t, s, "wtwlt-01", base.Add(30*time.Minute), 22.0, 9.0, 0.3)
+	seedReading(t, s, "wtwlt-01", base.Add(90*time.Minute), 24.0, 4.0, 0.1)
+
+	from := base.Add(-time.Hour)
+	to := base.Add(3 * time.Hour)
+
+	hourly, err := s.History("wtwlt-01", from, to, "hour")
+	if err != nil {
+		t.Fatalf("History hour: %v", err)
+	}
+	if len(hourly) != 2 {
+		t.Fatalf("want 2 hourly buckets, got %d", len(hourly))
+	}
+	// Hour 10: avg temp = 21, max gust = 9, rain sum = 0.5, count 2.
+	h10 := hourly[0]
+	if h10.Count != 2 {
+		t.Errorf("hour10 count = %d", h10.Count)
+	}
+	if h10.TempC == nil || *h10.TempC != 21.0 {
+		t.Errorf("hour10 avg temp = %v, want 21", h10.TempC)
+	}
+	if h10.WindGustMPS == nil || *h10.WindGustMPS != 9.0 {
+		t.Errorf("hour10 max gust = %v, want 9", h10.WindGustMPS)
+	}
+	if diff := h10.RainMM - 0.5; diff < -1e-9 || diff > 1e-9 {
+		t.Errorf("hour10 rain sum = %v, want 0.5", h10.RainMM)
+	}
+	if !h10.Bucket.Equal(time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC)) {
+		t.Errorf("hour10 bucket = %v", h10.Bucket)
+	}
+
+	// Day bucket: all three collapse into one day.
+	daily, err := s.History("wtwlt-01", from, to, "day")
+	if err != nil {
+		t.Fatalf("History day: %v", err)
+	}
+	if len(daily) != 1 || daily[0].Count != 3 {
+		t.Fatalf("want 1 daily bucket of 3, got %+v", daily)
+	}
+}
+
+func TestHistoryInvalidBucket(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.History("wtwlt-01", time.Time{}, time.Now(), "week"); err == nil {
+		t.Fatal("expected error for invalid bucket")
+	}
+}
+
+func TestSummarize(t *testing.T) {
+	s := newTestStore(t)
+	base := time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC)
+	seedReading(t, s, "wtwlt-01", base, 18.0, 5.0, 0.2)
+	seedReading(t, s, "wtwlt-01", base.Add(time.Hour), 26.0, 12.0, 0.3)
+
+	sum, err := s.Summarize("wtwlt-01", base.Add(-time.Hour), base.Add(2*time.Hour))
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if sum.Count != 2 {
+		t.Errorf("count = %d", sum.Count)
+	}
+	if sum.TempMinC == nil || *sum.TempMinC != 18.0 {
+		t.Errorf("temp min = %v", sum.TempMinC)
+	}
+	if sum.TempMaxC == nil || *sum.TempMaxC != 26.0 {
+		t.Errorf("temp max = %v", sum.TempMaxC)
+	}
+	if sum.TempAvgC == nil || *sum.TempAvgC != 22.0 {
+		t.Errorf("temp avg = %v", sum.TempAvgC)
+	}
+	if sum.WindGustMaxMPS == nil || *sum.WindGustMaxMPS != 12.0 {
+		t.Errorf("gust max = %v", sum.WindGustMaxMPS)
+	}
+	if diff := sum.RainTotalMM - 0.5; diff < -1e-9 || diff > 1e-9 {
+		t.Errorf("rain total = %v, want 0.5", sum.RainTotalMM)
+	}
+}
+
+func TestSummarizeEmpty(t *testing.T) {
+	s := newTestStore(t)
+	sum, err := s.Summarize("nobody", time.Now().Add(-time.Hour), time.Now())
+	if err != nil {
+		t.Fatalf("Summarize empty: %v", err)
+	}
+	if sum.Count != 0 || sum.TempAvgC != nil || sum.RainTotalMM != 0 {
+		t.Errorf("empty summary should be zero-valued, got %+v", sum)
+	}
+}
+
+func TestLightningEvents(t *testing.T) {
+	s := newTestStore(t)
+	base := time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC)
+	for i, km := range []int{5, 10, 15} {
+		l := model.Lightning{StationID: "wtwlt-01", Event: "strike", DistanceKm: km, Energy: int64(1000 * (i + 1))}
+		ts := base.Add(time.Duration(i) * time.Minute)
+		if err := s.InsertLightning(l, ts, ts); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+
+	events, err := s.LightningEvents("wtwlt-01", base.Add(-time.Hour), base.Add(time.Hour), 100)
+	if err != nil {
+		t.Fatalf("LightningEvents: %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("want 3 events, got %d", len(events))
+	}
+	// Newest first.
+	if events[0].DistanceKm != 15 {
+		t.Errorf("first event should be newest (15km), got %d", events[0].DistanceKm)
+	}
+
+	// Limit is respected.
+	limited, err := s.LightningEvents("wtwlt-01", base.Add(-time.Hour), base.Add(time.Hour), 2)
+	if err != nil {
+		t.Fatalf("LightningEvents limit: %v", err)
+	}
+	if len(limited) != 2 {
+		t.Errorf("want 2 with limit, got %d", len(limited))
+	}
+}

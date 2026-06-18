@@ -35,8 +35,29 @@ SQLite (WAL mode), and an HTTP server goroutine that reads from it.
 | Route | Returns |
 |-------|---------|
 | `GET /healthz` | `ok` |
-| `GET /api/current?station=wtwlt-01` | latest reading for a station |
+| `GET /api/current` | latest reading for a station |
+| `GET /api/history` | time-bucketed aggregates for charts |
+| `GET /api/summary` | min/max/avg + total rain over a range |
+| `GET /api/lightning` | recent strike events (newest first) |
 | `GET /api/stations` | status (online/offline, last-seen) of all stations |
+
+Common query params:
+
+- `station` — station id (default `wtwlt-01`).
+- `units` — `metric` (default) or `imperial`. Values are stored metric and
+  converted at the API layer; responses include a `units` descriptor object and a
+  `unit_system` field. Dashboard endpoints use unit-neutral field names
+  (`temp`, `wind_avg`, `rain`, …) so the toggle is unambiguous.
+- `from` / `to` — RFC3339 timestamps (default: last 24h).
+- `bucket` (history) — `raw` | `hour` | `day` (history aggregation granularity).
+- `limit` (lightning) — max events, default 100, capped at 1000.
+
+Example:
+
+```bash
+curl 'localhost:8080/api/history?bucket=hour&units=imperial&from=2026-06-16T00:00:00Z&to=2026-06-17T00:00:00Z'
+curl 'localhost:8080/api/summary?units=imperial'
+```
 
 **DB:** SQLite via `modernc.org/sqlite` (pure Go, cgo-free) — so it cross-compiles
 to the Pi with a plain `GOOS=linux GOARCH=arm64 go build`.

@@ -289,6 +289,9 @@ Lighter sketch; to be detailed when Phase 1 lands.
 - **Ingest (Go):** subscribes to `wtwlt/station/+/readings` and `.../lightning`,
   validates against the schema, and writes to the local DB. Tracks last-seen per
   station for staleness/alerting.
+- **API (implemented):** `/api/current`, `/api/history` (raw|hour|day buckets),
+  `/api/summary`, `/api/lightning`, `/api/stations`, `/healthz`. Stored metric,
+  converted to a `units=metric|imperial` query param at the response layer.
 - **Database:** **SQLite** (`modernc.org/sqlite`, cgo-free, WAL) embedded in the
   Go service — see the comparison + rationale below. This workload is small and gentle:
   ~1 write/min (~1,440 rows/day, ~525k rows/year) plus occasional lightning

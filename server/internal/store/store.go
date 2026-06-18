@@ -192,6 +192,160 @@ func (s *Store) Stations() ([]StationStatus, error) {
 	return out, rows.Err()
 }
 
+// HistoryBucket is one time bucket of aggregated readings. Nullable averages are
+// nil when every reading in the bucket had that sensor absent.
+type HistoryBucket struct {
+	Bucket      time.Time `json:"-"`
+	Count       int
+	TempC       *float64
+	HumidityPct *float64
+	PressureHpa *float64
+	UVIndex     *float64
+	WindAvgMPS  *float64
+	WindGustMPS *float64 // peak gust in the bucket
+	RainMM      float64  // accumulated in the bucket
+	SoilPct     *float64
+}
+
+// bucketExpr returns a SQL expression that truncates the RFC3339 `ts` column to
+// the requested granularity using substr (robust across SQLite versions).
+func bucketExpr(bucket string) (string, error) {
+	switch bucket {
+	case "", "raw":
+		return "ts", nil
+	case "hour":
+		return "substr(ts,1,13) || ':00:00Z'", nil
+	case "day":
+		return "substr(ts,1,10) || 'T00:00:00Z'", nil
+	default:
+		return "", fmt.Errorf("invalid bucket %q (want raw|hour|day)", bucket)
+	}
+}
+
+// History returns aggregated readings for [from,to) bucketed by granularity.
+func (s *Store) History(stationID string, from, to time.Time, bucket string) ([]HistoryBucket, error) {
+	expr, err := bucketExpr(bucket)
+	if err != nil {
+		return nil, err
+	}
+	q := fmt.Sprintf(`
+		SELECT %s AS bucket, COUNT(*),
+		       AVG(temp_c), AVG(humidity_pct), AVG(pressure_hpa), AVG(uv_index),
+		       AVG(wind_avg_mps), MAX(wind_gust_mps), SUM(rain_mm), AVG(soil_moisture_pct)
+		FROM readings
+		WHERE station_id=? AND ts>=? AND ts<?
+		GROUP BY bucket ORDER BY bucket`, expr)
+
+	rows, err := s.db.Query(q, stationID, isoUTC(from), isoUTC(to))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []HistoryBucket
+	for rows.Next() {
+		var (
+			b                                       HistoryBucket
+			bucketS                                 string
+			temp, hum, pres, uv, wavg, wgust, soil  sql.NullFloat64
+			rain                                    sql.NullFloat64
+		)
+		if err := rows.Scan(&bucketS, &b.Count, &temp, &hum, &pres, &uv, &wavg, &wgust, &rain, &soil); err != nil {
+			return nil, err
+		}
+		b.Bucket, _ = time.Parse(time.RFC3339, bucketS)
+		b.TempC, b.HumidityPct, b.PressureHpa, b.UVIndex = nullF(temp), nullF(hum), nullF(pres), nullF(uv)
+		b.WindAvgMPS, b.WindGustMPS, b.SoilPct = nullF(wavg), nullF(wgust), nullF(soil)
+		if rain.Valid {
+			b.RainMM = rain.Float64
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// Summary is min/max/avg statistics over a time range.
+type Summary struct {
+	Count          int
+	TempMinC       *float64
+	TempMaxC       *float64
+	TempAvgC       *float64
+	HumidityAvgPct *float64
+	PressureMinHpa *float64
+	PressureMaxHpa *float64
+	PressureAvgHpa *float64
+	WindAvgMPS     *float64
+	WindGustMaxMPS *float64
+	RainTotalMM    float64
+}
+
+// Summarize returns aggregate stats for [from,to).
+func (s *Store) Summarize(stationID string, from, to time.Time) (Summary, error) {
+	row := s.db.QueryRow(`
+		SELECT COUNT(*),
+		       MIN(temp_c), MAX(temp_c), AVG(temp_c),
+		       AVG(humidity_pct),
+		       MIN(pressure_hpa), MAX(pressure_hpa), AVG(pressure_hpa),
+		       AVG(wind_avg_mps), MAX(wind_gust_mps),
+		       SUM(rain_mm)
+		FROM readings WHERE station_id=? AND ts>=? AND ts<?`,
+		stationID, isoUTC(from), isoUTC(to))
+
+	var (
+		sum                                        Summary
+		tmin, tmax, tavg, havg                     sql.NullFloat64
+		pmin, pmax, pavg, wavg, wgust, rain        sql.NullFloat64
+	)
+	if err := row.Scan(&sum.Count, &tmin, &tmax, &tavg, &havg, &pmin, &pmax, &pavg, &wavg, &wgust, &rain); err != nil {
+		return sum, err
+	}
+	sum.TempMinC, sum.TempMaxC, sum.TempAvgC = nullF(tmin), nullF(tmax), nullF(tavg)
+	sum.HumidityAvgPct = nullF(havg)
+	sum.PressureMinHpa, sum.PressureMaxHpa, sum.PressureAvgHpa = nullF(pmin), nullF(pmax), nullF(pavg)
+	sum.WindAvgMPS, sum.WindGustMaxMPS = nullF(wavg), nullF(wgust)
+	if rain.Valid {
+		sum.RainTotalMM = rain.Float64
+	}
+	return sum, nil
+}
+
+// LightningEvent is one stored strike (or disturber/noise) event.
+type LightningEvent struct {
+	StationID  string
+	TS         time.Time
+	Event      string
+	DistanceKm int
+	Energy     int64
+}
+
+// LightningEvents returns events in [from,to), newest first, capped at limit.
+func (s *Store) LightningEvents(stationID string, from, to time.Time, limit int) ([]LightningEvent, error) {
+	rows, err := s.db.Query(`
+		SELECT station_id, ts, event, distance_km, energy
+		FROM lightning
+		WHERE station_id=? AND ts>=? AND ts<?
+		ORDER BY ts DESC LIMIT ?`,
+		stationID, isoUTC(from), isoUTC(to), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []LightningEvent
+	for rows.Next() {
+		var (
+			e   LightningEvent
+			tsS string
+		)
+		if err := rows.Scan(&e.StationID, &tsS, &e.Event, &e.DistanceKm, &e.Energy); err != nil {
+			return nil, err
+		}
+		e.TS, _ = time.Parse(time.RFC3339, tsS)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // --- helpers: map *float64 <-> SQL NULL ---
 
 func fptr(p *float64) interface{} {

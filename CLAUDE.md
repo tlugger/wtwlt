@@ -73,6 +73,10 @@ don't batch it up for later:**
   single Go binary (`paho.mqtt.golang` + pure-Go `modernc.org/sqlite` + stdlib
   `net/http`) — no separate Python service. The `server/` Python mock publisher
   is a dev test fixture only, never deployed.
+- **Go style:** prefer `samber/lo` for slice transforms (`lo.Map`/`Filter`/
+  `Reduce`/etc.) over hand-rolled loops. Keep classic `for` loops where each
+  iteration needs error handling (e.g. `sql.Rows` scanning). Everything stays
+  fully tested.
 - **Database is undecided** — see the comparison in `SPEC.md §4` (SQLite is the
   pragmatic lean; RRDtool/DuckDB/VictoriaMetrics are contenders). Optimize for a
   resource-limited Pi: low RAM, SD-card write wear (favor WAL/batched writes).
