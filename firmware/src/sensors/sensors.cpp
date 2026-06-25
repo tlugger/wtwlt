@@ -52,10 +52,31 @@ float readSoilPct() {
 
 }  // namespace
 
+namespace {
+// Bench diagnostic: log every device that ACKs on the I2C bus. Helps confirm
+// which sensors are actually present (e.g. BME280 0x77, VEML6075 0x10).
+void i2cScan() {
+  Serial.print("[sensors] I2C scan:");
+  uint8_t found = 0;
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf(" 0x%02X", addr);
+      found++;
+    }
+  }
+  Serial.println(found ? "" : " (no devices found)");
+}
+}  // namespace
+
 namespace sensors {
 
 void begin() {
   Wire.begin();
+
+#if DEBUG_I2C_SCAN
+  i2cScan();
+#endif
 
   analogReadResolution(12);            // ESP32 ADC: 12-bit (0..4095)
 

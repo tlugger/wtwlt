@@ -152,6 +152,7 @@ the Pi:
 curl -fsSL https://raw.githubusercontent.com/tlugger/wtwlt/main/install.sh | sudo bash
 ```
 
-The installer picks the right binary for the Pi's architecture, installs a
-`systemd` service, and starts it. Re-running it upgrades in place. Config lives in
-`/home/pi/wtwlt/.env`. Details in [`server/README.md`](server/README.md).
+The installer picks the right binary for the Pi's architecture, provisions the
+Mosquitto broker, installs a `systemd` service, and starts it. Re-running it
+upgrades in place. Config lives in `/home/pi/wtwlt/.env`. Details in
+[`server/README.md`](server/README.md).

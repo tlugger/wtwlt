@@ -56,6 +56,8 @@ static const uint8_t VEML6075_ADDR = 0x10;
 #define ENABLE_UV        1
 #define ENABLE_LIGHTNING 1
 #define ENABLE_SOIL      1
+// Log all responding I2C addresses at boot (bench bring-up diagnostic).
+#define DEBUG_I2C_SCAN   1
 // Publish disturber/noise lightning events too (else only real strikes)?
 #define LIGHTNING_REPORT_NONSTRIKE 0
 
