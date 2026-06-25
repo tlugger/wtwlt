@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tlugger/wtwlt/server/internal/forecast"
 	"github.com/tlugger/wtwlt/server/internal/model"
 	"github.com/tlugger/wtwlt/server/internal/store"
 )
@@ -161,7 +162,7 @@ func TestCurrentNotFound(t *testing.T) {
 func seedHistory(t *testing.T, st *store.Store) {
 	t.Helper()
 	rows := []struct {
-		ts          string
+		ts               string
 		temp, gust, rain float64
 	}{
 		{"2026-06-16T12:00:00Z", 20, 5, 0.2},
@@ -223,7 +224,7 @@ func TestHistoryInvalidTime(t *testing.T) {
 func TestSummary(t *testing.T) {
 	st, h := newServer(t)
 	for _, row := range []struct {
-		ts         string
+		ts               string
 		temp, gust, rain float64
 	}{
 		{"2026-06-16T12:00:00Z", 18, 5, 0.2},
@@ -296,5 +297,65 @@ func TestStations(t *testing.T) {
 	decode(t, rr, &stations)
 	if len(stations) != 1 || !stations[0].Online {
 		t.Errorf("stations = %+v", stations)
+	}
+}
+
+func TestForecastEndpoint(t *testing.T) {
+	st, h := newServer(t)
+	now := time.Now().UTC().Truncate(time.Hour)
+	// One in-window future hour, one past hour (should be filtered out).
+	pts := []forecast.Point{
+		{TS: now.Add(time.Hour), TempC: fp(20), HumidityPct: fp(50), PressureHpa: fp(840), PrecipMm: fp(0), WindMps: fp(5), WindDirDeg: fp(270)},
+		{TS: now.Add(-2 * time.Hour), TempC: fp(10)},
+	}
+	if err := st.UpsertForecast("openmeteo", pts, now); err != nil {
+		t.Fatalf("seed forecast: %v", err)
+	}
+
+	// Metric: temp passes through; source reported.
+	rr := do(t, h, "/api/forecast?units=metric")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d", rr.Code)
+	}
+	var resp forecastResp
+	decode(t, rr, &resp)
+	if resp.Source != "openmeteo" {
+		t.Errorf("source = %q", resp.Source)
+	}
+	if len(resp.Points) != 1 {
+		t.Fatalf("got %d points, want 1 (past filtered)", len(resp.Points))
+	}
+	if resp.Points[0].Temp == nil || *resp.Points[0].Temp != 20 {
+		t.Errorf("metric temp = %v, want 20", resp.Points[0].Temp)
+	}
+	if resp.Units.Temp != "°C" {
+		t.Errorf("units.temp = %q", resp.Units.Temp)
+	}
+
+	// Imperial: temp converted to °F, wind to mph.
+	rr = do(t, h, "/api/forecast?units=imperial")
+	var imp forecastResp
+	decode(t, rr, &imp)
+	if imp.Points[0].Temp == nil || *imp.Points[0].Temp != 68 { // 20°C
+		t.Errorf("imperial temp = %v, want 68", imp.Points[0].Temp)
+	}
+	if imp.Units.Speed != "mph" {
+		t.Errorf("units.speed = %q", imp.Units.Speed)
+	}
+}
+
+func TestForecastEmpty(t *testing.T) {
+	_, h := newServer(t)
+	rr := do(t, h, "/api/forecast")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d", rr.Code)
+	}
+	var resp forecastResp
+	decode(t, rr, &resp)
+	if resp.Points == nil {
+		t.Error("points should be [] not null")
+	}
+	if len(resp.Points) != 0 {
+		t.Errorf("want 0 points, got %d", len(resp.Points))
 	}
 }

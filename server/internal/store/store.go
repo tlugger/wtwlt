@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tlugger/wtwlt/server/internal/forecast"
 	"github.com/tlugger/wtwlt/server/internal/model"
 
 	_ "modernc.org/sqlite"
@@ -91,6 +92,21 @@ CREATE TABLE IF NOT EXISTS readings_daily (
     soil_avg REAL,
     PRIMARY KEY (station_id, bucket)
 );
+
+-- Fetched forecast (NOT measured): one row per source+hour, in metric/SI.
+-- INSERT OR REPLACE on refresh keeps the latest projection for each hour.
+CREATE TABLE IF NOT EXISTS forecast (
+    source       TEXT NOT NULL,
+    ts           TEXT NOT NULL,
+    fetched_at   TEXT NOT NULL,
+    temp_c       REAL,
+    humidity_pct REAL,
+    pressure_hpa REAL,
+    precip_mm    REAL,
+    wind_mps     REAL,
+    wind_dir_deg REAL,
+    PRIMARY KEY (source, ts)
+);
 `
 
 // Open opens (and migrates) the SQLite database at path. Use ":memory:" for tests.
@@ -163,8 +179,8 @@ func (s *Store) LatestReading(stationID string) (model.Reading, time.Time, error
 		FROM readings WHERE station_id=? ORDER BY ts DESC LIMIT 1`, stationID)
 
 	var (
-		r    model.Reading
-		tsS  string
+		r                               model.Reading
+		tsS                             string
 		temp, hum, pres, uv, soil, batt sql.NullFloat64
 	)
 	err := row.Scan(
@@ -369,9 +385,9 @@ func (s *Store) Summarize(stationID string, from, to time.Time) (Summary, error)
 		stationID, isoUTC(from), isoUTC(to))
 
 	var (
-		sum                                        Summary
-		tmin, tmax, tavg, havg                     sql.NullFloat64
-		pmin, pmax, pavg, wavg, wgust, rain        sql.NullFloat64
+		sum                                 Summary
+		tmin, tmax, tavg, havg              sql.NullFloat64
+		pmin, pmax, pavg, wavg, wgust, rain sql.NullFloat64
 	)
 	if err := row.Scan(&sum.Count, &tmin, &tmax, &tavg, &havg, &pmin, &pmax, &pavg, &wavg, &wgust, &rain); err != nil {
 		return sum, err
@@ -421,6 +437,77 @@ func (s *Store) LightningEvents(stationID string, from, to time.Time, limit int)
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// UpsertForecast replaces the stored forecast for `source` with `pts` (each an
+// hourly point, metric/SI). Existing hours are overwritten so a refreshed
+// projection supersedes the prior one; new hours are added.
+func (s *Store) UpsertForecast(source string, pts []forecast.Point, fetchedAt time.Time) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO forecast
+			(source, ts, fetched_at, temp_c, humidity_pct, pressure_hpa, precip_mm, wind_mps, wind_dir_deg)
+		VALUES (?,?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	fa := isoUTC(fetchedAt)
+	for _, p := range pts {
+		if _, err := stmt.Exec(source, isoUTC(p.TS), fa,
+			fptr(p.TempC), fptr(p.HumidityPct), fptr(p.PressureHpa),
+			fptr(p.PrecipMm), fptr(p.WindMps), fptr(p.WindDirDeg)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// Forecast returns stored forecast points for `source` in [from,to), ordered by
+// time, along with the source actually used. An empty source picks whichever
+// source has the most rows (the active one).
+func (s *Store) Forecast(source string, from, to time.Time) ([]forecast.Point, string, error) {
+	if source == "" {
+		_ = s.db.QueryRow(`SELECT source FROM forecast GROUP BY source ORDER BY COUNT(*) DESC LIMIT 1`).Scan(&source)
+	}
+	rows, err := s.db.Query(`
+		SELECT ts, temp_c, humidity_pct, pressure_hpa, precip_mm, wind_mps, wind_dir_deg
+		FROM forecast WHERE source=? AND ts>=? AND ts<? ORDER BY ts`,
+		source, isoUTC(from), isoUTC(to))
+	if err != nil {
+		return nil, source, err
+	}
+	defer rows.Close()
+	var out []forecast.Point
+	for rows.Next() {
+		var (
+			p                                      forecast.Point
+			tsS                                    string
+			temp, hum, pres, precip, wind, windDir sql.NullFloat64
+		)
+		if err := rows.Scan(&tsS, &temp, &hum, &pres, &precip, &wind, &windDir); err != nil {
+			return nil, source, err
+		}
+		p.TS, _ = time.Parse(time.RFC3339, tsS)
+		p.TempC, p.HumidityPct, p.PressureHpa = nullF(temp), nullF(hum), nullF(pres)
+		p.PrecipMm, p.WindMps, p.WindDirDeg = nullF(precip), nullF(wind), nullF(windDir)
+		out = append(out, p)
+	}
+	return out, source, rows.Err()
+}
+
+// PruneForecast deletes forecast rows older than `before` (past hours that have
+// been superseded by real readings), returning the row count.
+func (s *Store) PruneForecast(before time.Time) (int64, error) {
+	res, err := s.db.Exec(`DELETE FROM forecast WHERE ts < ?`, isoUTC(before))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // --- helpers: map *float64 <-> SQL NULL ---

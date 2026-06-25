@@ -10,8 +10,10 @@ which logs them to SQLite and serves an earth-toned dashboard + JSON API.
   happen. See [`firmware/README.md`](firmware/README.md).
 - **`server/`** — the Raspberry Pi backend: a single **Go service** that ingests
   the station's MQTT messages into SQLite and serves the dashboard + JSON API from
-  the same binary. Ships with a local Mosquitto config and a Python mock publisher
-  for exercising the pipeline without hardware. See [`server/README.md`](server/README.md).
+  the same binary. It also pulls a near-term forecast from a keyless provider
+  (Open-Meteo or NWS) to overlay on the charts. Ships with a local Mosquitto config
+  and a Python mock publisher for exercising the pipeline without hardware. See
+  [`server/README.md`](server/README.md).
 
 ## Architecture
 
@@ -31,7 +33,9 @@ which logs them to SQLite and serves an earth-toned dashboard + JSON API.
 **Data flow:** sensors → ESP32 samples @1 Hz → aggregates over 60 s → publishes
 one JSON message per minute (plus event-driven lightning) to MQTT → the Go
 service on the Pi subscribes, persists to SQLite (downsampling old data into
-hourly/daily rollups), and serves the dashboard + API that read it.
+hourly/daily rollups), and serves the dashboard + API that read it. Separately,
+the service polls a keyless forecast provider and stores the projection in its
+own table for the dashboard's forecast overlay.
 
 ## Hardware
 
@@ -65,7 +69,10 @@ Pins, cadence, and calibration constants live in
 ## Dashboard
 
 An earth-toned dashboard whose palette shifts with the time of day and live
-conditions (clear / dusk / night / rain / storm):
+conditions (clear / dusk / night / rain / storm). Each chart continues past
+"now" with a dashed, muted **forecast overlay** (temperature, humidity,
+pressure, wind, precipitation) so the projection reads as one line with the
+measured history:
 
 ![wtwlt dashboard shown in day, dusk, and night themes](docs/dashboard-themes.png)
 

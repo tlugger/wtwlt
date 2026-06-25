@@ -66,6 +66,12 @@ WTWLT_MQTT_PORT=1883
 WTWLT_MQTT_USER=
 WTWLT_MQTT_PASS=
 WTWLT_RETENTION_DAYS=90
+
+# Forecast overlay (keyless). Provider: openmeteo (default) | nws | none.
+# Set the station's coordinates so the projection matches your location.
+WTWLT_FORECAST_PROVIDER=openmeteo
+WTWLT_LAT=39.7392
+WTWLT_LON=-104.9903
 EOF
   chmod 600 "$INSTALL_DIR/.env"
   ok "Created $INSTALL_DIR/.env (local broker, port 8080, 90-day retention)"

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tlugger/wtwlt/server/internal/forecast"
 	"github.com/tlugger/wtwlt/server/internal/model"
 )
 
@@ -28,8 +29,8 @@ func TestInsertAndLatestReading(t *testing.T) {
 
 	older := model.Reading{
 		StationID: "wtwlt-01", IntervalS: 60,
-		TempC: f(20.0),
-		Wind:  model.Wind{AvgMPS: 1.0, DirCardinal: "N"},
+		TempC:       f(20.0),
+		Wind:        model.Wind{AvgMPS: 1.0, DirCardinal: "N"},
 		Diagnostics: model.Diagnostics{FWVersion: "1.0.0"},
 	}
 	newer := older
@@ -298,5 +299,64 @@ func TestLightningEvents(t *testing.T) {
 	}
 	if len(limited) != 2 {
 		t.Errorf("want 2 with limit, got %d", len(limited))
+	}
+}
+
+func TestForecastUpsertAndRead(t *testing.T) {
+	s := newTestStore(t)
+	base := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	fetched := base.Add(-time.Minute)
+
+	pts := []forecast.Point{
+		{TS: base, TempC: f(18), HumidityPct: f(55), PressureHpa: f(840), PrecipMm: f(0), WindMps: f(3), WindDirDeg: f(270)},
+		{TS: base.Add(time.Hour), TempC: f(20), WindMps: f(4)}, // pressure/precip absent -> nil
+	}
+	if err := s.UpsertForecast("openmeteo", pts, fetched); err != nil {
+		t.Fatalf("UpsertForecast: %v", err)
+	}
+
+	// Empty source auto-selects the only stored source.
+	got, src, err := s.Forecast("", base, base.Add(48*time.Hour))
+	if err != nil {
+		t.Fatalf("Forecast: %v", err)
+	}
+	if src != "openmeteo" {
+		t.Errorf("source = %q, want openmeteo", src)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d points, want 2", len(got))
+	}
+	if got[0].TempC == nil || *got[0].TempC != 18 {
+		t.Errorf("temp = %v, want 18", got[0].TempC)
+	}
+	if got[1].PressureHpa != nil {
+		t.Errorf("absent pressure should be nil, got %v", got[1].PressureHpa)
+	}
+
+	// Re-upsert the same hour with a revised value -> REPLACE, not duplicate.
+	if err := s.UpsertForecast("openmeteo", []forecast.Point{{TS: base, TempC: f(19)}}, fetched.Add(time.Hour)); err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+	got, _, _ = s.Forecast("openmeteo", base, base.Add(48*time.Hour))
+	if len(got) != 2 {
+		t.Fatalf("after replace got %d points, want 2", len(got))
+	}
+	if got[0].TempC == nil || *got[0].TempC != 19 {
+		t.Errorf("revised temp = %v, want 19", got[0].TempC)
+	}
+
+	// Range filter excludes out-of-window hours.
+	windowed, _, _ := s.Forecast("openmeteo", base.Add(30*time.Minute), base.Add(48*time.Hour))
+	if len(windowed) != 1 {
+		t.Errorf("windowed got %d, want 1", len(windowed))
+	}
+
+	// Prune drops past hours.
+	n, err := s.PruneForecast(base.Add(30 * time.Minute))
+	if err != nil {
+		t.Fatalf("PruneForecast: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("pruned %d, want 1", n)
 	}
 }
