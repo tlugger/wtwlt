@@ -93,45 +93,56 @@ func main() {
 	}
 	if prov != nil {
 		// Resolve a coarse place label (city/state) for the dashboard, once.
+		// Retry a few times so a transient boot-time network hiccup doesn't drop
+		// the label until the next restart.
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-			if loc, err := geocode.Reverse(ctx, cfg.Lat, cfg.Lon); err != nil {
+			for attempt := 0; attempt < 5; attempt++ {
+				ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+				loc, err := geocode.Reverse(ctx, cfg.Lat, cfg.Lon)
+				cancel()
+				if err == nil {
+					websrv.SetLocation(loc)
+					log.Printf("forecast location: %s", loc)
+					return
+				}
 				log.Printf("geocode: %v", err)
-			} else {
-				websrv.SetLocation(loc)
-				log.Printf("forecast location: %s", loc)
+				time.Sleep(2 * time.Minute)
 			}
 		}()
 
-		fetchForecast := func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		fetchForecast := func() bool {
+			ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 			defer cancel()
 			pts, err := prov.Fetch(ctx, cfg.Lat, cfg.Lon)
 			if err != nil {
 				log.Printf("forecast: fetch (%s): %v", prov.Name(), err)
-				return
+				return false
 			}
 			now := time.Now().UTC()
 			if err := st.UpsertForecast(prov.Name(), pts, now); err != nil {
 				log.Printf("forecast: store: %v", err)
-				return
+				return false
 			}
 			if _, err := st.PruneForecast(now); err != nil {
 				log.Printf("forecast: prune: %v", err)
 			}
 			log.Printf("forecast: stored %d hours from %s", len(pts), prov.Name())
+			return true
 		}
-		interval := cfg.ForecastMinutes
+		interval := time.Duration(cfg.ForecastMinutes) * time.Minute
 		if interval <= 0 {
-			interval = 60
+			interval = time.Hour
 		}
-		go fetchForecast() // initial fetch off the startup path
+		// Poll on a timer; after a failure (e.g. a transient TLS/DNS hiccup at
+		// boot) retry soon instead of waiting the full interval.
 		go func() {
-			t := time.NewTicker(time.Duration(interval) * time.Minute)
-			defer t.Stop()
-			for range t.C {
-				fetchForecast()
+			const retry = 2 * time.Minute
+			for {
+				wait := interval
+				if !fetchForecast() {
+					wait = retry
+				}
+				time.Sleep(wait)
 			}
 		}()
 	}
