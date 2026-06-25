@@ -123,10 +123,52 @@ else
   warn "Binary version check failed — continuing anyway"
 fi
 
-# ── broker check (informational) ────────────────────────────────────
-if ! command -v mosquitto &>/dev/null && ! systemctl list-unit-files 2>/dev/null | grep -q '^mosquitto'; then
-  warn "Mosquitto broker not detected — the server needs one to ingest data."
-  warn "Install it with: sudo apt install mosquitto && sudo systemctl enable --now mosquitto"
+# ── Mosquitto broker ────────────────────────────────────────────────
+# Provision the broker the server (and the station) talk to. Anonymous by
+# default; if WTWLT_MQTT_USER is set in .env, require matching credentials.
+# Set WTWLT_SKIP_BROKER=1 to manage the broker yourself.
+env_val() { grep -E "^$1=" "$INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2-; }
+
+step "Setting up Mosquitto broker"
+if [ "${WTWLT_SKIP_BROKER:-}" = "1" ]; then
+  warn "WTWLT_SKIP_BROKER=1 — skipping broker setup (manage it yourself)"
+elif ! command -v apt-get &>/dev/null; then
+  warn "No apt-get here — install/configure a broker manually:"
+  warn "  the server needs MQTT on port 1883 (see server/mosquitto/mosquitto.conf)"
+else
+  if ! command -v mosquitto &>/dev/null; then
+    (apt-get update -qq && apt-get install -y -qq mosquitto mosquitto-clients) & spin $! "Installing mosquitto"
+  else
+    ok "mosquitto already installed"
+  fi
+
+  MQ_USER="$(env_val WTWLT_MQTT_USER)"
+  MQ_PASS="$(env_val WTWLT_MQTT_PASS)"
+  CONF="/etc/mosquitto/conf.d/wtwlt.conf"
+  if [ -n "$MQ_USER" ]; then
+    PW="/etc/mosquitto/wtwlt.passwd"
+    mosquitto_passwd -b -c "$PW" "$MQ_USER" "$MQ_PASS"
+    chown mosquitto:mosquitto "$PW" 2>/dev/null || true
+    chmod 600 "$PW"
+    cat > "$CONF" <<EOF
+# managed by wtwlt install.sh
+listener 1883
+allow_anonymous false
+password_file $PW
+EOF
+    ok "Broker configured with auth for user '$MQ_USER' (port 1883)"
+    warn "Ensure the station's secrets.h MQTT_USER/MQTT_PASS match."
+  else
+    cat > "$CONF" <<EOF
+# managed by wtwlt install.sh
+listener 1883
+allow_anonymous true
+EOF
+    ok "Broker configured (anonymous, port 1883)"
+  fi
+  systemctl enable mosquitto >/dev/null 2>&1 || true
+  systemctl restart mosquitto
+  ok "Mosquitto running"
 fi
 
 # ── systemd service ─────────────────────────────────────────────────

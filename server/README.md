@@ -140,5 +140,11 @@ curl -fsSL https://raw.githubusercontent.com/tlugger/wtwlt/main/install.sh | sud
 ```
 
 `install.sh` downloads the right binary for the Pi's architecture (or builds from
-source as a fallback), writes `/home/pi/wtwlt/.env` and a `systemd` unit, and
-starts the `wtwlt` service. Re-running upgrades in place.
+source as a fallback), provisions the **Mosquitto broker** (installs it if
+missing and writes a port-1883 listener conf — anonymous, or auth matching the
+`.env` `WTWLT_MQTT_USER`/`WTWLT_MQTT_PASS` if set), writes `/home/pi/wtwlt/.env`
+and a `systemd` unit, and starts the `wtwlt` service. Re-running upgrades in
+place. Set `WTWLT_SKIP_BROKER=1` to manage the broker yourself.
+
+If the broker uses auth, set the **firmware's** `secrets.h` `MQTT_USER`/`MQTT_PASS`
+to the same credentials so the station can connect.
