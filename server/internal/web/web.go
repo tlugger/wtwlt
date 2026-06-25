@@ -106,13 +106,14 @@ type historyResp struct {
 }
 
 type forecastPoint struct {
-	TS       string   `json:"ts"`
-	Temp     *float64 `json:"temp"`
-	Humidity *float64 `json:"humidity"`
-	Pressure *float64 `json:"pressure"`
-	Precip   *float64 `json:"precip"`
-	WindAvg  *float64 `json:"wind_avg"`
-	WindDir  *float64 `json:"wind_dir"`
+	TS        string   `json:"ts"`
+	Temp      *float64 `json:"temp"`
+	Humidity  *float64 `json:"humidity"`
+	Pressure  *float64 `json:"pressure"`
+	Precip    *float64 `json:"precip"`
+	WindAvg   *float64 `json:"wind_avg"`
+	WindDir   *float64 `json:"wind_dir"`
+	Condition string   `json:"condition"`
 }
 
 type forecastResp struct {
@@ -243,11 +244,12 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-// GET /api/forecast?station=&units=&source= — stored forecast for now..now+48h.
+// GET /api/forecast?station=&units=&source= — stored forecast for the coming
+// week (the chart overlay clamps to 48h client-side; the tiles use the rest).
 func (s *Server) forecast(w http.ResponseWriter, r *http.Request) {
 	sys := units.Parse(r.URL.Query().Get("units"))
 	now := time.Now().UTC()
-	from, to := now, now.Add(48*time.Hour)
+	from, to := now, now.Add(7*24*time.Hour)
 	pts, source, err := s.store.Forecast(r.URL.Query().Get("source"), from, to)
 	if err != nil {
 		serverError(w, err)
@@ -259,13 +261,14 @@ func (s *Server) forecast(w http.ResponseWriter, r *http.Request) {
 		UnitSystem: sys.Name(), Units: sys.Labels(),
 		Points: lo.Map(pts, func(p forecast.Point, _ int) forecastPoint {
 			return forecastPoint{
-				TS:       p.TS.Format(time.RFC3339),
-				Temp:     sys.Temp(p.TempC),
-				Humidity: sys.Pct(p.HumidityPct),
-				Pressure: sys.Pressure(p.PressureHpa),
-				Precip:   sys.Rain(p.PrecipMm),
-				WindAvg:  sys.Speed(p.WindMps),
-				WindDir:  p.WindDirDeg,
+				TS:        p.TS.Format(time.RFC3339),
+				Temp:      sys.Temp(p.TempC),
+				Humidity:  sys.Pct(p.HumidityPct),
+				Pressure:  sys.Pressure(p.PressureHpa),
+				Precip:    sys.Rain(p.PrecipMm),
+				WindAvg:   sys.Speed(p.WindMps),
+				WindDir:   p.WindDirDeg,
+				Condition: p.Condition,
 			}
 		}),
 	}

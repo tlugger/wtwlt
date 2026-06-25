@@ -42,7 +42,9 @@ dashed, muted projection continuing each chart past "now". Providers are
 swappable: **Open-Meteo** (default; one keyless call, covers every field
 including pressure) or **NWS/NOAA** (official US source, also keyless, but its
 hourly product carries no barometric pressure or precip amount — those publish
-as `null`). Set `WTWLT_FORECAST_PROVIDER=none` to disable.
+as `null`). Set `WTWLT_FORECAST_PROVIDER=none` to disable. A normalized
+condition (clear/cloudy/rain/…) is derived per hour and drives the dashboard's
+forecast tiles (4-hour segments on the 24h view, daily otherwise).
 
 **Rollups & retention:** every 10 minutes the service recomputes hourly/daily
 aggregates from raw into `readings_hourly` / `readings_daily`, then prunes raw
@@ -58,7 +60,7 @@ read these rollup tables, so long-range charts stay fast and survive pruning
 | `GET /healthz` | `ok` |
 | `GET /api/current` | latest reading for a station |
 | `GET /api/history` | time-bucketed aggregates for charts |
-| `GET /api/forecast` | hourly forecast for the next 48h (overlay) |
+| `GET /api/forecast` | hourly forecast for the coming week (chart overlay + tiles) |
 | `GET /api/summary` | min/max/avg + total rain over a range |
 | `GET /api/lightning` | recent strike events (newest first) |
 | `GET /api/stations` | status (online/offline, last-seen) of all stations |

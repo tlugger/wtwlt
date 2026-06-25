@@ -121,6 +121,20 @@
   .stat .value { font-size:28px; font-weight:700; color:var(--accent-2); overflow-wrap:anywhere; }
   .stat .label { font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-dim); margin-top:4px; }
 
+  /* forecast strip */
+  #forecastStrip { margin-bottom:16px; }
+  .fstrip-head { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; }
+  .fstrip-head h2 { margin:0; }
+  .fstrip-src { font-size:11px; color:var(--ink-dim); }
+  .forecast-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:12px; }
+  .ftile { padding:14px 8px; text-align:center; min-width:0; display:flex; flex-direction:column; align-items:center; gap:3px; }
+  .ftile .ft-when { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--ink-dim); }
+  .ftile .ft-ico { font-size:30px; line-height:1.1; }
+  .ftile .ft-temp { font-size:15px; font-weight:700; color:var(--accent-2); }
+  .ftile .ft-temp .lo { color:var(--ink-dim); font-weight:600; }
+  .ftile .ft-cond { font-size:11px; color:var(--ink); overflow-wrap:anywhere; }
+  .ftile .ft-sub { font-size:10px; color:var(--accent); }
+
   /* range chips */
   .chips { display:flex; gap:8px; margin-bottom:14px; }
   .chip { font-size:12px; font-weight:600; padding:6px 14px; border-radius:20px; border:1px solid var(--card-border); background:var(--card-bg); color:var(--ink-dim); cursor:pointer; transition:all .15s; }
@@ -153,6 +167,8 @@
     .grid { grid-template-columns:1fr; }
     .now .big { font-size:52px; }
     .tiles { grid-template-columns:repeat(2,1fr); }
+    .forecast-strip { grid-template-columns:repeat(3,1fr); }
+    .ftile .ft-ico { font-size:26px; }
     .chart-wrap { height:200px; }
   }
   @media (max-width:430px) {
@@ -207,6 +223,12 @@
     <span class="chip" data-range="30d">30 days</span>
   </div>
   <section class="stats" id="stats"></section>
+
+  <!-- Forecast strip (projected conditions; granularity follows the range) -->
+  <section id="forecastStrip" hidden>
+    <div class="fstrip-head"><h2>Forecast</h2><span class="fstrip-src" id="forecastSrc"></span></div>
+    <div class="forecast-strip" id="forecastTiles"></div>
+  </section>
 
   <!-- Charts -->
   <section class="grid">
@@ -264,6 +286,20 @@ const MAIN_METRICS = {
 
 // which forecast field backs each lead metric (UV has no forecast).
 const FORECAST_KEYS = { temp:"temp", humidity:"humidity", pressure:"pressure", uv:null };
+
+// normalized condition -> icon (day/night variants) + label. Order of
+// COND_SEVERITY is least→most significant, used to pick a tile's headline.
+const COND = {
+  clear:   { day:"☀️", night:"🌙", label:"Clear" },
+  partly:  { day:"⛅", night:"☁️", label:"Partly cloudy" },
+  cloudy:  { day:"☁️", night:"☁️", label:"Cloudy" },
+  fog:     { day:"🌫️", night:"🌫️", label:"Fog" },
+  drizzle: { day:"🌦️", night:"🌧️", label:"Drizzle" },
+  rain:    { day:"🌧️", night:"🌧️", label:"Rain" },
+  snow:    { day:"🌨️", night:"🌨️", label:"Snow" },
+  thunder: { day:"⛈️", night:"⛈️", label:"Thunder" },
+};
+const COND_SEVERITY = ["clear","partly","cloudy","fog","drizzle","rain","snow","thunder"];
 
 const RANGES = {
   "24h": { ms: 24*3600e3,  bucket: "raw"  },
@@ -518,6 +554,7 @@ function bucketLabel(iso) {
 // Fetch history + forecast in parallel, then render every chart from the cache.
 async function loadCharts() {
   await Promise.all([fetchHistory(), fetchForecast()]);
+  renderForecastTiles();
   if (state.history) renderCharts();
 }
 async function fetchHistory() {
@@ -530,17 +567,19 @@ async function fetchHistory() {
 async function fetchForecast() {
   try {
     const f = await getJSON(`/api/forecast?station=${STATION}&units=${state.units}`);
-    state.forecast = { pts: f.points || [], units: f.units };
-  } catch { state.forecast = { pts: [], units: null }; }
+    state.forecast = { pts: f.points || [], units: f.units, source: f.source };
+  } catch { state.forecast = { pts: [], units: null, source: "" }; }
 }
 
-// Forecast resampled to the active range's bucket. Day ranges collapse the
-// hourly forecast into daily points so the projected tail stays small.
+// Forecast for the CHART overlay: clamped to 48h ahead, and on day ranges
+// collapsed into daily points so the projected tail stays small.
 function forecastPts() {
   const f = state.forecast; if (!f || !f.pts.length) return [];
-  if (RANGES[state.range].bucket !== "day") return f.pts;
+  const cutoff = Date.now() + 48*3600e3;
+  const within = f.pts.filter(p => new Date(p.ts).getTime() <= cutoff);
+  if (RANGES[state.range].bucket !== "day") return within;
   const days = {};
-  for (const p of f.pts) (days[p.ts.slice(0,10)] ||= []).push(p);
+  for (const p of within) (days[p.ts.slice(0,10)] ||= []).push(p);
   const agg = (arr, k, sum) => {
     const v = arr.map(p => p[k]).filter(x => x != null);
     if (!v.length) return null;
@@ -650,6 +689,78 @@ function renderMain() {
   c.update("none");
 }
 
+/* ── forecast tiles ──────────────────────────────────────────────── */
+// Headline condition for a group of hours: most frequent, ties broken toward
+// the more significant condition (so a rainy spell isn't hidden by clear hours).
+function dominantCond(conds) {
+  const n = {};
+  for (const c of conds) if (c) n[c] = (n[c]||0) + 1;
+  let best = "", bn = 0, bsev = -1;
+  for (const [c, cnt] of Object.entries(n)) {
+    const sev = COND_SEVERITY.indexOf(c);
+    if (cnt > bn || (cnt === bn && sev > bsev)) { best = c; bn = cnt; bsev = sev; }
+  }
+  return best;
+}
+function isNight(date) { try { return timeOfDay(date) === "night"; } catch (e) { return false; } }
+
+// Summarize a set of hourly points into one tile (hi/lo, headline condition,
+// precip total, day/night icon choice from the segment midpoint).
+function buildTile(seg, idx, mode) {
+  const temps = seg.map(p => p.temp).filter(v => v != null);
+  const precip = seg.map(p => p.precip).filter(v => v != null).reduce((a,b) => a+b, 0);
+  const mid = new Date((new Date(seg[0].ts).getTime() + new Date(seg[seg.length-1].ts).getTime())/2);
+  return {
+    idx, mode, when: new Date(seg[0].ts),
+    hi: temps.length ? Math.max(...temps) : null,
+    lo: temps.length ? Math.min(...temps) : null,
+    cond: dominantCond(seg.map(p => p.condition)),
+    precip, night: isNight(mid),
+  };
+}
+// 24h view: the next 24h as six 4-hour segments.
+function hourlySegments(pts) {
+  const now = Date.now(), out = [];
+  for (let i = 0; i < 6; i++) {
+    const a = now + i*4*3600e3, b = a + 4*3600e3;
+    const seg = pts.filter(p => { const t = new Date(p.ts).getTime(); return t >= a && t < b; });
+    if (seg.length) out.push(buildTile(seg, i, "hour"));
+  }
+  return out;
+}
+// 7d / 30d view: up to seven daily tiles.
+function dailySegments(pts) {
+  const days = {};
+  for (const p of pts) (days[p.ts.slice(0,10)] ||= []).push(p);
+  return Object.values(days).slice(0, 7).map((seg, i) => buildTile(seg, i, "day"));
+}
+function tileWhen(t) {
+  if (t.mode === "hour") return t.idx === 0 ? "Now" : t.when.toLocaleTimeString([], {hour:"numeric"});
+  return t.idx === 0 ? "Today" : t.when.toLocaleDateString([], {weekday:"short"});
+}
+function forecastTile(t, u) {
+  const c = COND[t.cond] || { day:"⛅", night:"⛅", label:"—" };
+  const ico = t.night ? c.night : c.day;
+  const hi = t.hi == null ? "—" : `${Math.round(t.hi)}°`;
+  const lo = t.lo == null ? "" : `<span class="lo">${Math.round(t.lo)}°</span>`;
+  const sub = t.precip > 0 ? `<div class="ft-sub">💧 ${fmtNum(t.precip, state.units==="imperial"?2:1)} ${u.rain}</div>` : "";
+  return `<div class="ftile card">
+    <div class="ft-when">${tileWhen(t)}</div>
+    <div class="ft-ico" role="img" aria-label="${c.label}">${ico}</div>
+    <div class="ft-temp">${hi} ${lo}</div>
+    <div class="ft-cond">${c.label}</div>${sub}
+  </div>`;
+}
+function renderForecastTiles() {
+  const f = state.forecast, wrap = $("forecastStrip");
+  if (!f || !f.pts.length) { wrap.hidden = true; return; }
+  const tiles = state.range === "24h" ? hourlySegments(f.pts) : dailySegments(f.pts);
+  if (!tiles.length) { wrap.hidden = true; return; }
+  $("forecastTiles").innerHTML = tiles.map(t => forecastTile(t, f.units)).join("");
+  $("forecastSrc").textContent = f.source ? `via ${f.source}` : "";
+  wrap.hidden = false;
+}
+
 /* ── wiring ──────────────────────────────────────────────────────── */
 function setUnits(u) {
   state.units = u;
@@ -668,6 +779,7 @@ function init() {
   const params = new URLSearchParams(location.search);
   if (params.get("theme")) state.themeOverride = params.get("theme");
   if (params.get("metric") && MAIN_METRICS[params.get("metric")]) state.mainMetric = params.get("metric");
+  if (params.get("range") && RANGES[params.get("range")]) state.range = params.get("range");
   if (params.get("lat")) LOC.lat = parseFloat(params.get("lat"));
   if (params.get("lon")) LOC.lon = parseFloat(params.get("lon"));
   initCharts();
@@ -687,6 +799,7 @@ function init() {
     t.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
   });
   document.querySelectorAll("#metricTabs .mtab").forEach(x => x.classList.toggle("active", x.dataset.m === state.mainMetric));
+  document.querySelectorAll("#rangeChips .chip").forEach(c => c.classList.toggle("active", c.dataset.range === state.range));
   setUnits(state.units);             // sets toggle + triggers first full load
   applyTheme();
   setInterval(refreshLive, 60e3);    // live tiles refresh each minute

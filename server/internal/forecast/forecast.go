@@ -28,7 +28,21 @@ type Point struct {
 	PrecipMm    *float64
 	WindMps     *float64
 	WindDirDeg  *float64
+	Condition   string // normalized sky/precip condition (see Condition* below)
 }
+
+// Normalized condition vocabulary — provider-agnostic so the dashboard maps a
+// single small set to icons + labels. "" means unknown.
+const (
+	CondClear   = "clear"
+	CondPartly  = "partly"
+	CondCloudy  = "cloudy"
+	CondFog     = "fog"
+	CondDrizzle = "drizzle"
+	CondRain    = "rain"
+	CondSnow    = "snow"
+	CondThunder = "thunder"
+)
 
 // Provider fetches an hourly forecast for a location.
 type Provider interface {

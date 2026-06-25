@@ -308,7 +308,7 @@ func TestForecastUpsertAndRead(t *testing.T) {
 	fetched := base.Add(-time.Minute)
 
 	pts := []forecast.Point{
-		{TS: base, TempC: f(18), HumidityPct: f(55), PressureHpa: f(840), PrecipMm: f(0), WindMps: f(3), WindDirDeg: f(270)},
+		{TS: base, TempC: f(18), HumidityPct: f(55), PressureHpa: f(840), PrecipMm: f(0), WindMps: f(3), WindDirDeg: f(270), Condition: forecast.CondClear},
 		{TS: base.Add(time.Hour), TempC: f(20), WindMps: f(4)}, // pressure/precip absent -> nil
 	}
 	if err := s.UpsertForecast("openmeteo", pts, fetched); err != nil {
@@ -328,6 +328,9 @@ func TestForecastUpsertAndRead(t *testing.T) {
 	}
 	if got[0].TempC == nil || *got[0].TempC != 18 {
 		t.Errorf("temp = %v, want 18", got[0].TempC)
+	}
+	if got[0].Condition != forecast.CondClear {
+		t.Errorf("condition = %q, want clear", got[0].Condition)
 	}
 	if got[1].PressureHpa != nil {
 		t.Errorf("absent pressure should be nil, got %v", got[1].PressureHpa)

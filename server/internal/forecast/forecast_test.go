@@ -24,6 +24,7 @@ func TestParseOpenMeteo(t *testing.T) {
 	    "relative_humidity_2m": [55, 60],
 	    "surface_pressure": [840.2, 841.0],
 	    "precipitation": [0.0, 1.2],
+	    "weather_code": [0, 61],
 	    "wind_speed_10m": [3.4, null],
 	    "wind_direction_10m": [270, 280]
 	  }
@@ -45,9 +46,27 @@ func TestParseOpenMeteo(t *testing.T) {
 	approx(t, pts[0].PrecipMm, 0.0)
 	approx(t, pts[0].WindMps, 3.4)
 	approx(t, pts[0].WindDirDeg, 270)
+	if pts[0].Condition != CondClear { // code 0
+		t.Errorf("condition[0] = %q, want clear", pts[0].Condition)
+	}
+	if pts[1].Condition != CondRain { // code 61
+		t.Errorf("condition[1] = %q, want rain", pts[1].Condition)
+	}
 	// null wind speed -> nil pointer (graceful-degradation convention)
 	if pts[1].WindMps != nil {
 		t.Errorf("null wind_speed should parse to nil, got %v", *pts[1].WindMps)
+	}
+}
+
+func TestWMOCondition(t *testing.T) {
+	cases := map[int]string{
+		0: CondClear, 2: CondPartly, 3: CondCloudy, 48: CondFog,
+		53: CondDrizzle, 65: CondRain, 82: CondRain, 75: CondSnow, 86: CondSnow, 95: CondThunder, 99: CondThunder,
+	}
+	for code, want := range cases {
+		if got := wmoCondition(code); got != want {
+			t.Errorf("wmoCondition(%d) = %q, want %q", code, got, want)
+		}
 	}
 }
 
@@ -74,9 +93,9 @@ func TestParseNWSForecast(t *testing.T) {
 	// As returned with ?units=si: temperature in °C, wind as "N km/h".
 	body := []byte(`{"properties":{"periods":[
 	  {"startTime":"2026-06-25T08:00:00-06:00","temperature":18,"temperatureUnit":"C",
-	   "relativeHumidity":{"value":50},"windSpeed":"18 km/h","windDirection":"NW"},
+	   "relativeHumidity":{"value":50},"windSpeed":"18 km/h","windDirection":"NW","shortForecast":"Chance Showers And Thunderstorms"},
 	  {"startTime":"2026-06-25T09:00:00-06:00","temperature":20,"temperatureUnit":"C",
-	   "relativeHumidity":{"value":45},"windSpeed":"","windDirection":""}
+	   "relativeHumidity":{"value":45},"windSpeed":"","windDirection":"","shortForecast":"Mostly Sunny"}
 	]}}`)
 	pts, err := parseNWSForecast(body)
 	if err != nil {
@@ -101,6 +120,13 @@ func TestParseNWSForecast(t *testing.T) {
 	// blank wind fields -> nil
 	if pts[1].WindMps != nil || pts[1].WindDirDeg != nil {
 		t.Error("blank wind should parse to nil")
+	}
+	// "thunderstorms" beats "showers"; "Mostly Sunny" -> partly.
+	if pts[0].Condition != CondThunder {
+		t.Errorf("condition[0] = %q, want thunder", pts[0].Condition)
+	}
+	if pts[1].Condition != CondPartly {
+		t.Errorf("condition[1] = %q, want partly", pts[1].Condition)
 	}
 }
 

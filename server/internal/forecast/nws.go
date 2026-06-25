@@ -77,8 +77,35 @@ type nwsForecast struct {
 			} `json:"relativeHumidity"`
 			WindSpeed     string `json:"windSpeed"`
 			WindDirection string `json:"windDirection"`
+			ShortForecast string `json:"shortForecast"`
 		} `json:"periods"`
 	} `json:"properties"`
+}
+
+// shortForecastCondition maps NWS free-text ("Mostly Sunny", "Chance Showers
+// And Thunderstorms") to our vocabulary by keyword, most-significant first.
+func shortForecastCondition(s string) string {
+	l := strings.ToLower(s)
+	switch {
+	case strings.Contains(l, "thunder"):
+		return CondThunder
+	case strings.Contains(l, "snow"), strings.Contains(l, "flurr"), strings.Contains(l, "sleet"), strings.Contains(l, "blizzard"):
+		return CondSnow
+	case strings.Contains(l, "drizzle"):
+		return CondDrizzle
+	case strings.Contains(l, "rain"), strings.Contains(l, "shower"):
+		return CondRain
+	case strings.Contains(l, "fog"), strings.Contains(l, "haze"):
+		return CondFog
+	case strings.Contains(l, "partly"), strings.Contains(l, "mostly sunny"):
+		return CondPartly
+	case strings.Contains(l, "cloud"), strings.Contains(l, "overcast"):
+		return CondCloudy
+	case strings.Contains(l, "sunny"), strings.Contains(l, "clear"), strings.Contains(l, "fair"):
+		return CondClear
+	default:
+		return ""
+	}
 }
 
 func parseNWSForecast(body []byte) ([]Point, error) {
@@ -106,6 +133,7 @@ func parseNWSForecast(body []byte) ([]Point, error) {
 			HumidityPct: p.RelativeHumidity.Value,
 			WindMps:     parseWindSpeed(p.WindSpeed),
 			WindDirDeg:  cardinalToDeg(p.WindDirection),
+			Condition:   shortForecastCondition(p.ShortForecast),
 			// PressureHpa, PrecipMm: not provided by the NWS hourly product.
 		})
 	}

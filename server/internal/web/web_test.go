@@ -305,7 +305,7 @@ func TestForecastEndpoint(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Hour)
 	// One in-window future hour, one past hour (should be filtered out).
 	pts := []forecast.Point{
-		{TS: now.Add(time.Hour), TempC: fp(20), HumidityPct: fp(50), PressureHpa: fp(840), PrecipMm: fp(0), WindMps: fp(5), WindDirDeg: fp(270)},
+		{TS: now.Add(time.Hour), TempC: fp(20), HumidityPct: fp(50), PressureHpa: fp(840), PrecipMm: fp(0), WindMps: fp(5), WindDirDeg: fp(270), Condition: forecast.CondRain},
 		{TS: now.Add(-2 * time.Hour), TempC: fp(10)},
 	}
 	if err := st.UpsertForecast("openmeteo", pts, now); err != nil {
@@ -327,6 +327,9 @@ func TestForecastEndpoint(t *testing.T) {
 	}
 	if resp.Points[0].Temp == nil || *resp.Points[0].Temp != 20 {
 		t.Errorf("metric temp = %v, want 20", resp.Points[0].Temp)
+	}
+	if resp.Points[0].Condition != forecast.CondRain {
+		t.Errorf("condition = %q, want rain", resp.Points[0].Condition)
 	}
 	if resp.Units.Temp != "°C" {
 		t.Errorf("units.temp = %q", resp.Units.Temp)

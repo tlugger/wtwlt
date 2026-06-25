@@ -72,7 +72,8 @@ An earth-toned dashboard whose palette shifts with the time of day and live
 conditions (clear / dusk / night / rain / storm). Each chart continues past
 "now" with a dashed, muted **forecast overlay** (temperature, humidity,
 pressure, wind, precipitation) so the projection reads as one line with the
-measured history:
+measured history, plus a row of **forecast condition tiles** (icon, high/low,
+condition) — 4-hour segments on the 24h view, daily on the longer ranges:
 
 ![wtwlt dashboard shown in day, dusk, and night themes](docs/dashboard-themes.png)
 

@@ -22,12 +22,12 @@ type openMeteo struct {
 func (o *openMeteo) Name() string { return "openmeteo" }
 
 func (o *openMeteo) Fetch(ctx context.Context, lat, lon float64) ([]Point, error) {
-	// forecast_days=3 guarantees ≥48 h ahead regardless of the current hour
-	// (the day count is calendar days from today). timezone=UTC so the naive
-	// timestamps are UTC; wind_speed_unit=ms keeps it SI like everything else.
+	// forecast_days=7 covers the daily tiles; the chart overlay clamps to 48 h
+	// client-side. timezone=UTC so the naive timestamps are UTC;
+	// wind_speed_unit=ms keeps it SI like everything else.
 	url := fmt.Sprintf("%s?latitude=%.4f&longitude=%.4f"+
-		"&hourly=temperature_2m,relative_humidity_2m,surface_pressure,precipitation,wind_speed_10m,wind_direction_10m"+
-		"&wind_speed_unit=ms&timezone=UTC&forecast_days=3", o.base, lat, lon)
+		"&hourly=temperature_2m,relative_humidity_2m,surface_pressure,precipitation,weather_code,wind_speed_10m,wind_direction_10m"+
+		"&wind_speed_unit=ms&timezone=UTC&forecast_days=7", o.base, lat, lon)
 	body, err := getBody(ctx, o.hc, url, defaultUA, "application/json")
 	if err != nil {
 		return nil, err
@@ -39,14 +39,40 @@ func (o *openMeteo) Fetch(ctx context.Context, lat, lon float64) ([]Point, error
 // null, so each series is []*float64.
 type omResp struct {
 	Hourly struct {
-		Time      []string   `json:"time"`
-		Temp      []*float64 `json:"temperature_2m"`
-		Humidity  []*float64 `json:"relative_humidity_2m"`
-		Pressure  []*float64 `json:"surface_pressure"`
-		Precip    []*float64 `json:"precipitation"`
-		WindSpeed []*float64 `json:"wind_speed_10m"`
-		WindDir   []*float64 `json:"wind_direction_10m"`
+		Time        []string   `json:"time"`
+		Temp        []*float64 `json:"temperature_2m"`
+		Humidity    []*float64 `json:"relative_humidity_2m"`
+		Pressure    []*float64 `json:"surface_pressure"`
+		Precip      []*float64 `json:"precipitation"`
+		WeatherCode []*int     `json:"weather_code"`
+		WindSpeed   []*float64 `json:"wind_speed_10m"`
+		WindDir     []*float64 `json:"wind_direction_10m"`
 	} `json:"hourly"`
+}
+
+// wmoCondition maps a WMO weather-interpretation code to our vocabulary.
+// https://open-meteo.com/en/docs (weather_code table)
+func wmoCondition(code int) string {
+	switch {
+	case code == 0, code == 1:
+		return CondClear // clear / mainly clear
+	case code == 2:
+		return CondPartly
+	case code == 3:
+		return CondCloudy
+	case code == 45, code == 48:
+		return CondFog
+	case code >= 51 && code <= 57:
+		return CondDrizzle
+	case code >= 61 && code <= 67, code >= 80 && code <= 82:
+		return CondRain
+	case code >= 71 && code <= 77, code == 85, code == 86:
+		return CondSnow
+	case code >= 95:
+		return CondThunder
+	default:
+		return ""
+	}
 }
 
 func parseOpenMeteo(body []byte) ([]Point, error) {
@@ -72,6 +98,10 @@ func parseOpenMeteo(body []byte) ([]Point, error) {
 		if err != nil {
 			continue
 		}
+		cond := ""
+		if i < len(h.WeatherCode) && h.WeatherCode[i] != nil {
+			cond = wmoCondition(*h.WeatherCode[i])
+		}
 		out = append(out, Point{
 			TS:          t.UTC(),
 			TempC:       at(h.Temp, i),
@@ -80,6 +110,7 @@ func parseOpenMeteo(body []byte) ([]Point, error) {
 			PrecipMm:    at(h.Precip, i),
 			WindMps:     at(h.WindSpeed, i),
 			WindDirDeg:  at(h.WindDir, i),
+			Condition:   cond,
 		})
 	}
 	if len(out) == 0 {
