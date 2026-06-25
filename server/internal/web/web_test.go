@@ -124,24 +124,6 @@ func TestCurrentMetric(t *testing.T) {
 	if dto.BatteryV == nil || *dto.BatteryV != 3.92 {
 		t.Errorf("battery = %v", dto.BatteryV) // volts: never converted
 	}
-	if dto.Dewpoint == nil || *dto.Dewpoint != 12.8 { // 21.4°C @ 58.2% RH
-		t.Errorf("dewpoint = %v, want 12.8", dto.Dewpoint)
-	}
-}
-
-func TestDewPointC(t *testing.T) {
-	dp := dewPointC(fp(21.4), fp(58.2))
-	if dp == nil || *dp < 12.8 || *dp > 12.9 {
-		t.Errorf("dewPointC = %v, want ~12.84", dp)
-	}
-	// Saturated air: dew point ≈ temperature.
-	if dp := dewPointC(fp(20), fp(100)); dp == nil || *dp < 19.9 || *dp > 20.1 {
-		t.Errorf("dewPointC at 100%% = %v, want ~20", dp)
-	}
-	// Missing inputs / RH<=0 -> nil (undefined).
-	if dewPointC(nil, fp(50)) != nil || dewPointC(fp(20), nil) != nil || dewPointC(fp(20), fp(0)) != nil {
-		t.Error("dewPointC should be nil when inputs are missing or RH<=0")
-	}
 }
 
 func TestCurrentImperial(t *testing.T) {
@@ -167,9 +149,6 @@ func TestCurrentImperial(t *testing.T) {
 	}
 	if dto.Humidity == nil || *dto.Humidity != 58.2 {
 		t.Errorf("humidity should pass through unchanged, got %v", dto.Humidity)
-	}
-	if dto.Dewpoint == nil || *dto.Dewpoint != 55.1 { // 12.84°C -> °F
-		t.Errorf("dewpoint °F = %v, want 55.1", dto.Dewpoint)
 	}
 }
 

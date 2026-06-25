@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -91,7 +90,6 @@ type currentDTO struct {
 	Temp       *float64     `json:"temp"`
 	Humidity   *float64     `json:"humidity"`
 	Pressure   *float64     `json:"pressure"`
-	Dewpoint   *float64     `json:"dewpoint"`
 	Wind       windDTO      `json:"wind"`
 	Rain       float64      `json:"rain"`
 	Soil       *float64     `json:"soil"`
@@ -209,7 +207,6 @@ func (s *Server) current(w http.ResponseWriter, r *http.Request) {
 		Temp:      sys.Temp(reading.TempC),
 		Humidity:  sys.Pct(reading.HumidityPct),
 		Pressure:  sys.Pressure(reading.PressureHpa),
-		Dewpoint:  sys.Temp(dewPointC(reading.TempC, reading.HumidityPct)),
 		Wind: windDTO{
 			Avg:         sys.SpeedV(reading.Wind.AvgMPS),
 			Gust:        sys.SpeedV(reading.Wind.GustMPS),
@@ -223,20 +220,6 @@ func (s *Server) current(w http.ResponseWriter, r *http.Request) {
 		UnitSystem: sys.Name(),
 		Units:      sys.Labels(),
 	})
-}
-
-// dewPointC returns the dew point in °C from temperature (°C) and relative
-// humidity (%) via the Magnus-Tetens approximation. nil if either input is
-// missing or RH is non-positive (where the formula is undefined).
-func dewPointC(tempC, rh *float64) *float64 {
-	if tempC == nil || rh == nil || *rh <= 0 {
-		return nil
-	}
-	const a, b = 17.62, 243.12
-	t := *tempC
-	g := math.Log(*rh/100.0) + a*t/(b+t)
-	td := b * g / (a - g)
-	return &td
 }
 
 // GET /api/history?station=&from=&to=&bucket=raw|hour|day&units=

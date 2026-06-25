@@ -274,6 +274,7 @@ const state = {
   theme: null,
   themeOverride: null,   // ?theme=clear-day|dusk|night|rain|storm pins the look
   mainMetric: "temp",    // which metric the lead chart shows
+  current: null,         // latest reading (for re-rendering tiles)
   history: null,         // cached {pts, units} so metric switches don't refetch
   forecast: null,        // cached {pts, units} forecast overlay (now..now+48h)
 };
@@ -383,6 +384,7 @@ async function loadCurrent() {
   try { c = await getJSON(`/api/current?station=${STATION}&units=${state.units}`); }
   catch { setStatus(false, "no readings yet"); return; }
 
+  state.current = c;
   state.rainingNow = (c.rain || 0) > 0;
   const u = c.units;
   $("nowTemp").textContent = c.temp == null ? "—" : `${fmtNum(c.temp)}°`;
@@ -392,16 +394,45 @@ async function loadCurrent() {
   setStatus(online, online ? `updated ${relTime(c.ts)}` : `last seen ${relTime(c.ts)}`);
   $("nowUpdated").textContent = `${u.temp} · ${state.units}`;
 
+  renderTiles();
+  applyTheme();
+}
+// Tiles use the latest reading + the current cloud cover from the forecast,
+// so they re-render both when a reading arrives and when the forecast loads.
+function renderTiles() {
+  const c = state.current; if (!c) return;
+  const u = c.units;
   $("tiles").innerHTML = [
     windTile(c, u),
     tile("Humidity", `${fmtNum(c.humidity)}${u.humidity}`, ""),
     tile("Pressure", `${fmtNum(c.pressure)}`, u.pressure),
     tile("Rain (1m)", `${fmtNum(c.rain,2)}`, u.rain),
-    tile("Dew point", `${fmtNum(c.dewpoint)}°`, dewComfort(c.dewpoint)),
+    cloudTile(),
     tile("Soil", `${fmtNum(c.soil)}${u.soil}`, "moisture"),
   ].join("");
-
-  applyTheme();
+}
+// Current cloud cover comes from the forecast (no sensor); use the hour nearest now.
+function currentCloud() {
+  const f = state.forecast; if (!f || !f.pts.length) return null;
+  const now = Date.now();
+  let best = null, bd = Infinity;
+  for (const p of f.pts) {
+    const d = Math.abs(new Date(p.ts).getTime() - now);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best ? best.cloud_pct : null;
+}
+function cloudTile() {
+  const v = currentCloud();
+  return tile("Cloud cover", v == null ? "—" : `${Math.round(v)}%`, cloudWord(v));
+}
+function cloudWord(v) {
+  if (v == null) return "forecast";
+  if (v < 12) return "clear";
+  if (v < 38) return "mostly clear";
+  if (v < 70) return "partly cloudy";
+  if (v < 90) return "mostly cloudy";
+  return "overcast";
 }
 function tile(label, value, sub) {
   return `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub||"&nbsp;"}</div></div>`;
@@ -422,16 +453,6 @@ function compassSVG(deg, card) {
       <polygon points="50,82 43,52 50,59 57,52" fill="var(--ink-dim)"/>
     </g>
   </svg>`;
-}
-// Comfort descriptor for a dew point, thresholds in the active unit system.
-function dewComfort(dp) {
-  if (dp == null) return "";
-  const t = state.units === "imperial" ? [55,60,65,70] : [13,16,18,21];
-  if (dp < t[0]) return "dry";
-  if (dp < t[1]) return "comfortable";
-  if (dp < t[2]) return "sticky";
-  if (dp < t[3]) return "muggy";
-  return "oppressive";
 }
 function setStatus(online, text) {
   const el = $("status");
@@ -592,6 +613,7 @@ async function loadCharts() {
   await Promise.all([fetchHistory(), fetchForecast()]);
   renderForecastTiles();
   renderLoc();
+  renderTiles();   // fill the cloud-cover tile now the forecast is loaded
   if (state.history) renderCharts();
 }
 async function fetchHistory() {
