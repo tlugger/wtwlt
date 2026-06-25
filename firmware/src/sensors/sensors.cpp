@@ -40,14 +40,32 @@ volatile bool lightningFlag = false;
 void IRAM_ATTR onLightningIRQ() { lightningFlag = true; }
 #endif
 
-float readSoilPct() {
+// Power the soil sensor only while reading (avoids continuous-power corrosion).
+int readSoilRaw() {
+  digitalWrite(SOIL_POWER_PIN, HIGH);
+  delay(10);  // settle
   int raw = analogRead(SOIL_PIN);
-  // Map raw -> 0..100% (higher raw = drier).
+  digitalWrite(SOIL_POWER_PIN, LOW);
+  return raw;
+}
+
+// Linear map raw -> 0..100% between the calibrated dry/wet endpoints.
+float soilPctFromRaw(int raw) {
   float pct = 100.0f * (float)(SOIL_RAW_DRY - raw) /
               (float)(SOIL_RAW_DRY - SOIL_RAW_WET);
-  if (pct < 0) pct = 0;
+  if (pct <= 0) pct = 0;        // <= also normalizes -0.0 to 0
   if (pct > 100) pct = 100;
   return pct;
+}
+
+float readSoilPct() { return soilPctFromRaw(readSoilRaw()); }
+
+// Vane bearing with the mount-day North-alignment offset applied (mod 360).
+float windDirection() {
+  float d = weatherMeter.getWindDirection() + WIND_DIR_OFFSET_DEG;
+  d = fmodf(d, 360.0f);
+  if (d < 0) d += 360.0f;
+  return d;
 }
 
 }  // namespace
@@ -80,12 +98,17 @@ void begin() {
 
   analogReadResolution(12);            // ESP32 ADC: 12-bit (0..4095)
 
+#if ENABLE_SOIL
+  pinMode(SOIL_POWER_PIN, OUTPUT);
+  digitalWrite(SOIL_POWER_PIN, LOW);   // power-gated; only HIGH during a read
+#endif
+
   // ---- Weather Meter Kit ----
   weatherMeter.setADCResolutionBits(12);
   SFEWeatherMeterKitCalibrationParams cal = weatherMeter.getCalibrationParams();
   cal.mmPerRainfallCount = MM_PER_RAIN_COUNT;
   cal.kphPerCountPerSec  = KPH_PER_COUNT_PER_S;
-  // TODO: bench-calibrate cal.vaneADCValues[] for the ESP32 ADC.
+  for (int i = 0; i < 16; i++) cal.vaneADCValues[i] = VANE_ADC_VALUES[i];
   weatherMeter.setCalibrationParams(cal);
   weatherMeter.begin();
 
@@ -117,7 +140,7 @@ SensorReading read() {
   SensorReading r;
 
   r.windSpeedKph = weatherMeter.getWindSpeed();
-  r.windDirDeg   = weatherMeter.getWindDirection();
+  r.windDirDeg   = windDirection();
   r.totalRainMm  = weatherMeter.getTotalRainfall();
 
 #if ENABLE_BME
@@ -143,6 +166,16 @@ SensorReading read() {
 #endif
 
   return r;
+}
+
+void printRaw() {
+  int soil = readSoilRaw();
+  Serial.printf("[cal] vaneADC=%4d dir=%5.1f | soil=%5.1f%% | wsCnt=%lu rainCnt=%lu | wsPin=%d rainPin=%d\n",
+                analogRead(WIND_DIR_PIN), windDirection(),
+                soilPctFromRaw(soil),
+                (unsigned long)weatherMeter.getWindSpeedCounts(),
+                (unsigned long)weatherMeter.getRainfallCounts(),
+                digitalRead(WIND_SPEED_PIN), digitalRead(RAIN_PIN));
 }
 
 bool pollLightning(LightningEvent &ev) {
