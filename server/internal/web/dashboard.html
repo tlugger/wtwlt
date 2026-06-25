@@ -212,6 +212,7 @@
       <div class="big" id="nowTemp">—</div>
       <div class="cond" id="nowCond">awaiting the skies…</div>
       <div class="updated" id="nowUpdated"></div>
+      <div class="updated" id="nowLoc"></div>
     </div>
     <div class="tiles" id="tiles"></div>
   </section>
@@ -239,6 +240,8 @@
           <span class="mtab active" data-m="temp" role="button" tabindex="0">Temp</span>
           <span class="mtab" data-m="humidity" role="button" tabindex="0">Humidity</span>
           <span class="mtab" data-m="pressure" role="button" tabindex="0">Pressure</span>
+          <span class="mtab" data-m="precip" role="button" tabindex="0">Rain %</span>
+          <span class="mtab" data-m="cloud" role="button" tabindex="0">Cloud %</span>
         </div>
       </div>
       <div class="chart-wrap"><canvas id="mainChart" role="img" aria-label="Selected weather metric over time"></canvas></div>
@@ -271,19 +274,22 @@ const state = {
   theme: null,
   themeOverride: null,   // ?theme=clear-day|dusk|night|rain|storm pins the look
   mainMetric: "temp",    // which metric the lead chart shows
+  current: null,         // latest reading (for re-rendering tiles)
   history: null,         // cached {pts, units} so metric switches don't refetch
   forecast: null,        // cached {pts, units} forecast overlay (now..now+48h)
 };
 
 // the toggle-able lead chart: each metric maps to history fields + colours
 const MAIN_METRICS = {
-  temp:     { label:"Temperature", unit:"temp",     fill:true,  series:[{key:"temp",      label:"Temp",     color:"#C97B5A"}] },
-  humidity: { label:"Humidity",    unit:"humidity", fill:true,  series:[{key:"humidity",  label:"Humidity", color:"#6B8E9E"}] },
-  pressure: { label:"Pressure",    unit:"pressure", fill:false, series:[{key:"pressure",  label:"Pressure", color:"#9C8AA8"}] },
+  temp:     { label:"Temperature", unit:"temp",     fill:true,  series:[{key:"temp",          label:"Temp",        color:"#C97B5A"}] },
+  humidity: { label:"Humidity",    unit:"humidity", fill:true,  series:[{key:"humidity",      label:"Humidity",    color:"#6B8E9E"}] },
+  pressure: { label:"Pressure",    unit:"pressure", fill:false, series:[{key:"pressure",      label:"Pressure",    color:"#9C8AA8"}] },
+  precip:   { label:"Rain chance", unitText:"%",    fill:false, series:[{key:"precip_chance", label:"Rain chance", color:"#7FA6A6"}] },
+  cloud:    { label:"Cloud cover", unitText:"%",    fill:true,  forecastOnly:true, series:[{key:"cloud_pct", label:"Cloud cover", color:"#9AA7B0"}] },
 };
 
-// which forecast field backs each lead metric.
-const FORECAST_KEYS = { temp:"temp", humidity:"humidity", pressure:"pressure" };
+// which forecast field backs each lead metric (precip/cloud are forward-looking).
+const FORECAST_KEYS = { temp:"temp", humidity:"humidity", pressure:"pressure", precip:"precip_prob", cloud:"cloud_pct" };
 
 // normalized condition -> icon (day/night variants) + label. Order of
 // COND_SEVERITY is least→most significant, used to pick a tile's headline.
@@ -378,6 +384,7 @@ async function loadCurrent() {
   try { c = await getJSON(`/api/current?station=${STATION}&units=${state.units}`); }
   catch { setStatus(false, "no readings yet"); return; }
 
+  state.current = c;
   state.rainingNow = (c.rain || 0) > 0;
   const u = c.units;
   $("nowTemp").textContent = c.temp == null ? "—" : `${fmtNum(c.temp)}°`;
@@ -387,16 +394,45 @@ async function loadCurrent() {
   setStatus(online, online ? `updated ${relTime(c.ts)}` : `last seen ${relTime(c.ts)}`);
   $("nowUpdated").textContent = `${u.temp} · ${state.units}`;
 
+  renderTiles();
+  applyTheme();
+}
+// Tiles use the latest reading + the current cloud cover from the forecast,
+// so they re-render both when a reading arrives and when the forecast loads.
+function renderTiles() {
+  const c = state.current; if (!c) return;
+  const u = c.units;
   $("tiles").innerHTML = [
     windTile(c, u),
     tile("Humidity", `${fmtNum(c.humidity)}${u.humidity}`, ""),
     tile("Pressure", `${fmtNum(c.pressure)}`, u.pressure),
     tile("Rain (1m)", `${fmtNum(c.rain,2)}`, u.rain),
-    tile("Dew point", `${fmtNum(c.dewpoint)}°`, dewComfort(c.dewpoint)),
+    cloudTile(),
     tile("Soil", `${fmtNum(c.soil)}${u.soil}`, "moisture"),
   ].join("");
-
-  applyTheme();
+}
+// Current cloud cover comes from the forecast (no sensor); use the hour nearest now.
+function currentCloud() {
+  const f = state.forecast; if (!f || !f.pts.length) return null;
+  const now = Date.now();
+  let best = null, bd = Infinity;
+  for (const p of f.pts) {
+    const d = Math.abs(new Date(p.ts).getTime() - now);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best ? best.cloud_pct : null;
+}
+function cloudTile() {
+  const v = currentCloud();
+  return tile("Cloud cover", v == null ? "—" : `${Math.round(v)}%`, cloudWord(v));
+}
+function cloudWord(v) {
+  if (v == null) return "forecast";
+  if (v < 12) return "clear";
+  if (v < 38) return "mostly clear";
+  if (v < 70) return "partly cloudy";
+  if (v < 90) return "mostly cloudy";
+  return "overcast";
 }
 function tile(label, value, sub) {
   return `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub||"&nbsp;"}</div></div>`;
@@ -417,16 +453,6 @@ function compassSVG(deg, card) {
       <polygon points="50,82 43,52 50,59 57,52" fill="var(--ink-dim)"/>
     </g>
   </svg>`;
-}
-// Comfort descriptor for a dew point, thresholds in the active unit system.
-function dewComfort(dp) {
-  if (dp == null) return "";
-  const t = state.units === "imperial" ? [55,60,65,70] : [13,16,18,21];
-  if (dp < t[0]) return "dry";
-  if (dp < t[1]) return "comfortable";
-  if (dp < t[2]) return "sticky";
-  if (dp < t[3]) return "muggy";
-  return "oppressive";
 }
 function setStatus(online, text) {
   const el = $("status");
@@ -524,7 +550,8 @@ function baseOpts() {
     responsive:true, maintainAspectRatio:false,
     interaction:{ mode:"xband", intersect:false },
     plugins:{
-      legend:{ labels:{ color:cssVar("--ink-dim"), font:{size:11}, usePointStyle:true } },
+      legend:{ labels:{ color:cssVar("--ink-dim"), font:{size:11}, usePointStyle:true,
+               filter:(item) => !/\(forecast\)/.test(item.text) } },
       tooltip:{
         backgroundColor:cssVar("--bg-bottom"), borderColor:cssVar("--accent"), borderWidth:1,
         titleColor:cssVar("--accent"), bodyColor:cssVar("--ink"),
@@ -585,20 +612,29 @@ function applyChartTheme() {
 async function loadCharts() {
   await Promise.all([fetchHistory(), fetchForecast()]);
   renderForecastTiles();
+  renderLoc();
+  renderTiles();   // fill the cloud-cover tile now the forecast is loaded
   if (state.history) renderCharts();
 }
 async function fetchHistory() {
   const { from, to, bucket } = rangeParams();
   try {
     const h = await getJSON(`/api/history?station=${STATION}&units=${state.units}&from=${from}&to=${to}&bucket=${bucket}`);
-    state.history = { pts: h.points || [], units: h.units };
+    const pts = h.points || [];
+    // derive an actual "rain chance" from logged precip: it either rained or it didn't
+    pts.forEach(p => { p.precip_chance = (p.rain > 0) ? 100 : 0; });
+    state.history = { pts, units: h.units };
   } catch { /* keep last good history */ }
 }
 async function fetchForecast() {
   try {
     const f = await getJSON(`/api/forecast?station=${STATION}&units=${state.units}`);
-    state.forecast = { pts: f.points || [], units: f.units, source: f.source };
-  } catch { state.forecast = { pts: [], units: null, source: "" }; }
+    state.forecast = { pts: f.points || [], units: f.units, source: f.source, location: f.location };
+  } catch { state.forecast = { pts: [], units: null, source: "", location: "" }; }
+}
+function renderLoc() {
+  const f = state.forecast;
+  $("nowLoc").textContent = (f && f.location) ? `📍 ${f.location}` : "";
 }
 
 // Forecast resampled to the active range's bucket (daily on the day ranges).
@@ -613,10 +649,15 @@ function forecastResampled() {
     const t = v.reduce((a,b) => a+b, 0);
     return sum ? t : t / v.length;
   };
+  const maxOf = (arr, k) => {
+    const v = arr.map(p => p[k]).filter(x => x != null);
+    return v.length ? Math.max(...v) : null;
+  };
   return Object.entries(days).map(([d, arr]) => ({
     ts: d+"T00:00:00Z",
     temp: agg(arr,"temp"), humidity: agg(arr,"humidity"), pressure: agg(arr,"pressure"),
     wind_avg: agg(arr,"wind_avg"), precip: agg(arr,"precip",true),
+    precip_prob: maxOf(arr,"precip_prob"), cloud_pct: agg(arr,"cloud_pct"),
   }));
 }
 
@@ -672,8 +713,7 @@ function renderCharts() {
       sets.push({ label:"Rain (forecast)", data: fc.map(p => ({ x: tms(p.ts), y: p.precip })),
                   backgroundColor:SERIES.rain+"44", borderColor:SERIES.rain+"99", borderWidth:1, maxBarThickness:14, unit:u.rain });
     }
-    charts.rainChart.options.plugins.legend.display = sets.length > 1;
-    setChart("rainChart", sets);
+    setChart("rainChart", sets);   // single measured series — legend stays off
   }
   // humidity (left axis) + pressure (right axis), each with a forecast overlay
   {
@@ -694,21 +734,30 @@ function renderCharts() {
 function renderMain() {
   const h = state.history; if (!h) return;
   const cfg = MAIN_METRICS[state.mainMetric] || MAIN_METRICS.temp;
-  const unit = h.units[cfg.unit];
+  const unit = cfg.unitText || h.units[cfg.unit];
   const c = charts.mainChart;
   const { hist, fc } = chartAxis();
   const s = cfg.series[0];
   const fk = FORECAST_KEYS[state.mainMetric];
 
-  const d = ds(s.label, s.color);
-  d.fill = cfg.fill; d.unit = unit;
-  d.data = actualXY(hist, s.key);
-  const sets = [d];
-  if (fk && fc.length) {
-    const fd = fds(s.label, s.color); fd.unit = unit; fd.data = forecastXY(hist, fc, s.key, fk);
-    sets.push(fd);
+  let sets;
+  if (cfg.forecastOnly) {
+    // No sensor equivalent — render only the forecast so it spans the full axis
+    // (an empty actual series would stretch the axis across the history range).
+    const fd = fds(s.label, s.color); fd.unit = unit;
+    fd.data = fc.map(p => ({ x: tms(p.ts), y: p[fk] }));
+    sets = [fd];
+  } else {
+    const d = ds(s.label, s.color);
+    d.fill = cfg.fill; d.unit = unit;
+    d.data = actualXY(hist, s.key);
+    sets = [d];
+    if (fk && fc.length) {
+      const fd = fds(s.label, s.color); fd.unit = unit; fd.data = forecastXY(hist, fc, s.key, fk);
+      sets.push(fd);
+    }
   }
-  c.options.plugins.legend.display = sets.length > 1;
+  c.options.plugins.legend.display = false;   // the title names the metric
   c.data.datasets = sets;
   $("mainTitle").textContent = `${cfg.label} (${unit})`;
   c.update("none");
@@ -753,11 +802,11 @@ function hourlySegments(pts) {
   }
   return out;
 }
-// 7d / 30d view: up to seven daily tiles.
+// 7d / 30d view: up to six daily tiles (keeps a clean 6-up row on mobile).
 function dailySegments(pts) {
   const days = {};
   for (const p of pts) (days[p.ts.slice(0,10)] ||= []).push(p);
-  return Object.values(days).slice(0, 7).map((seg, i) => buildTile(seg, i, "day"));
+  return Object.values(days).slice(0, 6).map((seg, i) => buildTile(seg, i, "day"));
 }
 function tileWhen(t) {
   if (t.mode === "hour") return t.idx === 0 ? "Now" : t.when.toLocaleTimeString([], {hour:"numeric"});

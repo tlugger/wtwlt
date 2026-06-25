@@ -24,6 +24,8 @@ func TestParseOpenMeteo(t *testing.T) {
 	    "relative_humidity_2m": [55, 60],
 	    "surface_pressure": [840.2, 841.0],
 	    "precipitation": [0.0, 1.2],
+	    "precipitation_probability": [5, 80],
+	    "cloud_cover": [10, 95],
 	    "weather_code": [0, 61],
 	    "wind_speed_10m": [3.4, null],
 	    "wind_direction_10m": [270, 280]
@@ -46,6 +48,10 @@ func TestParseOpenMeteo(t *testing.T) {
 	approx(t, pts[0].PrecipMm, 0.0)
 	approx(t, pts[0].WindMps, 3.4)
 	approx(t, pts[0].WindDirDeg, 270)
+	approx(t, pts[0].PrecipProb, 5)
+	approx(t, pts[1].PrecipProb, 80)
+	approx(t, pts[0].CloudPct, 10)
+	approx(t, pts[1].CloudPct, 95)
 	if pts[0].Condition != CondClear { // code 0
 		t.Errorf("condition[0] = %q, want clear", pts[0].Condition)
 	}
@@ -93,7 +99,7 @@ func TestParseNWSForecast(t *testing.T) {
 	// As returned with ?units=si: temperature in °C, wind as "N km/h".
 	body := []byte(`{"properties":{"periods":[
 	  {"startTime":"2026-06-25T08:00:00-06:00","temperature":18,"temperatureUnit":"C",
-	   "relativeHumidity":{"value":50},"windSpeed":"18 km/h","windDirection":"NW","shortForecast":"Chance Showers And Thunderstorms"},
+	   "relativeHumidity":{"value":50},"probabilityOfPrecipitation":{"value":60},"windSpeed":"18 km/h","windDirection":"NW","shortForecast":"Chance Showers And Thunderstorms"},
 	  {"startTime":"2026-06-25T09:00:00-06:00","temperature":20,"temperatureUnit":"C",
 	   "relativeHumidity":{"value":45},"windSpeed":"","windDirection":"","shortForecast":"Mostly Sunny"}
 	]}}`)
@@ -111,11 +117,12 @@ func TestParseNWSForecast(t *testing.T) {
 	}
 	approx(t, pts[0].TempC, 18)
 	approx(t, pts[0].HumidityPct, 50)
+	approx(t, pts[0].PrecipProb, 60)
 	approx(t, pts[0].WindMps, 18.0/3.6)
 	approx(t, pts[0].WindDirDeg, 315)
-	// NWS supplies neither pressure nor a precip amount.
-	if pts[0].PressureHpa != nil || pts[0].PrecipMm != nil {
-		t.Error("nws should leave pressure and precip nil")
+	// NWS supplies precip probability but neither pressure, precip amount, nor cloud.
+	if pts[0].PressureHpa != nil || pts[0].PrecipMm != nil || pts[0].CloudPct != nil {
+		t.Error("nws should leave pressure, precip amount and cloud nil")
 	}
 	// blank wind fields -> nil
 	if pts[1].WindMps != nil || pts[1].WindDirDeg != nil {

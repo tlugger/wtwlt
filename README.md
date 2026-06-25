@@ -17,17 +17,22 @@ which logs them to SQLite and serves an earth-toned dashboard + JSON API.
 
 ## Architecture
 
-```
-┌─────────────────────────┐         MQTT/WiFi         ┌──────────────────────────────┐
-│  Weather Station Node    │ ───────────────────────▶ │  Raspberry Pi                  │
-│  ESP32 + SparkFun        │   (Mosquitto broker on    │                                │
-│  MicroMod Weather        │    the Pi)                │  • Mosquitto broker            │
-│  Carrier Board           │                           │  • Go service: MQTT ingest →   │
-│                          │                           │    SQLite → dashboard / API    │
-│  Solar + battery, always │                           │    (public exposure via        │
-│  awake, publishes 1×/min │                           │     port-forward + DDNS +       │
-│                          │                           │     reverse proxy)             │
-└─────────────────────────┘                           └──────────────────────────────┘
+```mermaid
+flowchart LR
+    node["Weather Station Node<br/>ESP32 + SparkFun MicroMod Weather Carrier<br/>solar + battery, always awake"]
+
+    subgraph pi [Raspberry Pi]
+        broker["Mosquitto broker"]
+        go["Go service<br/>MQTT ingest → SQLite<br/>hourly/daily rollups + retention<br/>dashboard + JSON API"]
+        broker --> go
+    end
+
+    fc["Forecast provider<br/>Open-Meteo / NWS, keyless"]
+    clients["Browser / API clients"]
+
+    node -->|"MQTT / WiFi · 1 msg/min + lightning"| broker
+    fc -->|"HTTPS · hourly"| go
+    go -->|"public: port-forward + DDNS + reverse proxy"| clients
 ```
 
 **Data flow:** sensors → ESP32 samples @1 Hz → aggregates over 60 s → publishes
@@ -35,7 +40,7 @@ one JSON message per minute (plus event-driven lightning) to MQTT → the Go
 service on the Pi subscribes, persists to SQLite (downsampling old data into
 hourly/daily rollups), and serves the dashboard + API that read it. Separately,
 the service polls a keyless forecast provider and stores the projection in its
-own table for the dashboard's forecast overlay.
+own table for the dashboard's forecast overlay and tiles.
 
 ## Hardware
 
@@ -57,11 +62,11 @@ An **ESP32** (MicroMod form factor) on a **SparkFun MicroMod Weather Carrier**:
 | Signal | Pin | Bus / notes |
 |--------|-----|-------------|
 | Wind direction (vane) | GPIO 35 (A1) | ADC1 — WiFi-safe analog |
-| Wind speed (anemometer) | GPIO 23 (D0) | digital, interrupt |
+| Wind speed (anemometer) | GPIO 14 (D0) | digital, interrupt |
 | Rain gauge | GPIO 27 (D1) | digital, interrupt |
-| Soil moisture | GPIO 39 (A0) | ADC1 analog terminal |
-| AS3935 lightning | CS = GPIO 12 | SPI; INT pin to verify on the bench |
-| BME280 / VEML6075 | I²C | 0x77 / 0x10 |
+| Soil moisture | GPIO 34 (A0) | ADC1 analog; power-gated via GPIO 4 |
+| AS3935 lightning | CS = GPIO 12, INT = GPIO 17 | SPI |
+| BME280 | I²C | 0x77 |
 
 Pins, cadence, and calibration constants live in
 [`firmware/include/config.h`](firmware/include/config.h).
@@ -76,6 +81,28 @@ measured history, plus a row of **forecast condition tiles** (icon, high/low,
 condition) — 4-hour segments on the 24h view, daily on the longer ranges:
 
 ![wtwlt dashboard shown in day, dusk, and night themes](docs/dashboard-themes.png)
+
+## Forecast
+
+Alongside its own measurements, the station shows a near-term forecast pulled
+from a **keyless, no-signup provider** — **Open-Meteo** (default) or
+**NWS/NOAA**. The Go service polls it on a timer and stores it in a separate
+table (sensor data stays measurement-only); the dashboard then renders it as:
+
+- a **dashed, muted overlay** that continues each chart past "now" so projected
+  temperature, humidity, pressure, wind and precipitation read as one line with
+  the measured history (the tail length adapts to how much history is shown);
+- **condition tiles** — icon, high/low and a short description, in 4-hour
+  segments on the 24h view and daily on the longer ranges;
+- two forward-looking **lead-chart options**, *Rain chance* and *Cloud cover*
+  (Open-Meteo only; NWS supplies precip probability but no cloud cover).
+
+Set `WTWLT_LAT`/`WTWLT_LON` to enable it (leave them blank to turn it off);
+`WTWLT_FORECAST_PROVIDER` selects the source. The coordinates are reverse-geocoded
+(keyless OpenStreetMap Nominatim) to a coarse city/state label shown on the
+dashboard — the **exact coordinates are never sent to the browser**. Units, the
+unit toggle, and the `units=` API param apply to forecast values too. Details in
+[`server/README.md`](server/README.md).
 
 ## MQTT data contract
 

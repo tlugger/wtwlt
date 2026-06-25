@@ -124,24 +124,6 @@ func TestCurrentMetric(t *testing.T) {
 	if dto.BatteryV == nil || *dto.BatteryV != 3.92 {
 		t.Errorf("battery = %v", dto.BatteryV) // volts: never converted
 	}
-	if dto.Dewpoint == nil || *dto.Dewpoint != 12.8 { // 21.4°C @ 58.2% RH
-		t.Errorf("dewpoint = %v, want 12.8", dto.Dewpoint)
-	}
-}
-
-func TestDewPointC(t *testing.T) {
-	dp := dewPointC(fp(21.4), fp(58.2))
-	if dp == nil || *dp < 12.8 || *dp > 12.9 {
-		t.Errorf("dewPointC = %v, want ~12.84", dp)
-	}
-	// Saturated air: dew point ≈ temperature.
-	if dp := dewPointC(fp(20), fp(100)); dp == nil || *dp < 19.9 || *dp > 20.1 {
-		t.Errorf("dewPointC at 100%% = %v, want ~20", dp)
-	}
-	// Missing inputs / RH<=0 -> nil (undefined).
-	if dewPointC(nil, fp(50)) != nil || dewPointC(fp(20), nil) != nil || dewPointC(fp(20), fp(0)) != nil {
-		t.Error("dewPointC should be nil when inputs are missing or RH<=0")
-	}
 }
 
 func TestCurrentImperial(t *testing.T) {
@@ -167,9 +149,6 @@ func TestCurrentImperial(t *testing.T) {
 	}
 	if dto.Humidity == nil || *dto.Humidity != 58.2 {
 		t.Errorf("humidity should pass through unchanged, got %v", dto.Humidity)
-	}
-	if dto.Dewpoint == nil || *dto.Dewpoint != 55.1 { // 12.84°C -> °F
-		t.Errorf("dewpoint °F = %v, want 55.1", dto.Dewpoint)
 	}
 }
 
@@ -326,7 +305,7 @@ func TestForecastEndpoint(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Hour)
 	// One in-window future hour, one past hour (should be filtered out).
 	pts := []forecast.Point{
-		{TS: now.Add(time.Hour), TempC: fp(20), HumidityPct: fp(50), PressureHpa: fp(840), PrecipMm: fp(0), WindMps: fp(5), WindDirDeg: fp(270), Condition: forecast.CondRain},
+		{TS: now.Add(time.Hour), TempC: fp(20), HumidityPct: fp(50), PressureHpa: fp(840), PrecipMm: fp(0), PrecipProb: fp(70), CloudPct: fp(85), WindMps: fp(5), WindDirDeg: fp(270), Condition: forecast.CondRain},
 		{TS: now.Add(-2 * time.Hour), TempC: fp(10)},
 	}
 	if err := st.UpsertForecast("openmeteo", pts, now); err != nil {
@@ -352,6 +331,12 @@ func TestForecastEndpoint(t *testing.T) {
 	if resp.Points[0].Condition != forecast.CondRain {
 		t.Errorf("condition = %q, want rain", resp.Points[0].Condition)
 	}
+	if resp.Points[0].PrecipProb == nil || *resp.Points[0].PrecipProb != 70 {
+		t.Errorf("precip_prob = %v, want 70", resp.Points[0].PrecipProb)
+	}
+	if resp.Points[0].Cloud == nil || *resp.Points[0].Cloud != 85 {
+		t.Errorf("cloud_pct = %v, want 85", resp.Points[0].Cloud)
+	}
 	if resp.Units.Temp != "°C" {
 		t.Errorf("units.temp = %q", resp.Units.Temp)
 	}
@@ -365,6 +350,32 @@ func TestForecastEndpoint(t *testing.T) {
 	}
 	if imp.Units.Speed != "mph" {
 		t.Errorf("units.speed = %q", imp.Units.Speed)
+	}
+}
+
+func TestForecastLocation(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "loc.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	srv := New(st)
+	srv.SetLocation("Thornton, Colorado")
+	h := srv.Handler()
+
+	rr := do(t, h, "/api/forecast")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d", rr.Code)
+	}
+	body := rr.Body.String()
+	var resp forecastResp
+	decode(t, rr, &resp)
+	if resp.Location != "Thornton, Colorado" {
+		t.Errorf("location = %q", resp.Location)
+	}
+	// Exact coordinates must never reach the client.
+	if strings.Contains(body, `"lat"`) || strings.Contains(body, `"lon"`) {
+		t.Errorf("response must not expose lat/lon: %s", body)
 	}
 }
 

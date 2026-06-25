@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS forecast (
     humidity_pct REAL,
     pressure_hpa REAL,
     precip_mm    REAL,
+    precip_prob  REAL,
+    cloud_pct    REAL,
     wind_mps     REAL,
     wind_dir_deg REAL,
     condition    TEXT,
@@ -121,9 +123,11 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	// Additive migration for DBs created before `condition` shipped. The error
-	// on an already-present column is expected and ignored.
+	// Additive migrations for columns added after the forecast table shipped.
+	// The error on an already-present column is expected and ignored.
 	db.Exec(`ALTER TABLE forecast ADD COLUMN condition TEXT`)
+	db.Exec(`ALTER TABLE forecast ADD COLUMN precip_prob REAL`)
+	db.Exec(`ALTER TABLE forecast ADD COLUMN cloud_pct REAL`)
 	return &Store{db: db}, nil
 }
 
@@ -454,8 +458,8 @@ func (s *Store) UpsertForecast(source string, pts []forecast.Point, fetchedAt ti
 	defer tx.Rollback()
 	stmt, err := tx.Prepare(`
 		INSERT OR REPLACE INTO forecast
-			(source, ts, fetched_at, temp_c, humidity_pct, pressure_hpa, precip_mm, wind_mps, wind_dir_deg, condition)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`)
+			(source, ts, fetched_at, temp_c, humidity_pct, pressure_hpa, precip_mm, precip_prob, cloud_pct, wind_mps, wind_dir_deg, condition)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -464,7 +468,8 @@ func (s *Store) UpsertForecast(source string, pts []forecast.Point, fetchedAt ti
 	for _, p := range pts {
 		if _, err := stmt.Exec(source, isoUTC(p.TS), fa,
 			fptr(p.TempC), fptr(p.HumidityPct), fptr(p.PressureHpa),
-			fptr(p.PrecipMm), fptr(p.WindMps), fptr(p.WindDirDeg), p.Condition); err != nil {
+			fptr(p.PrecipMm), fptr(p.PrecipProb), fptr(p.CloudPct),
+			fptr(p.WindMps), fptr(p.WindDirDeg), p.Condition); err != nil {
 			return err
 		}
 	}
@@ -479,7 +484,7 @@ func (s *Store) Forecast(source string, from, to time.Time) ([]forecast.Point, s
 		_ = s.db.QueryRow(`SELECT source FROM forecast GROUP BY source ORDER BY COUNT(*) DESC LIMIT 1`).Scan(&source)
 	}
 	rows, err := s.db.Query(`
-		SELECT ts, temp_c, humidity_pct, pressure_hpa, precip_mm, wind_mps, wind_dir_deg, condition
+		SELECT ts, temp_c, humidity_pct, pressure_hpa, precip_mm, precip_prob, cloud_pct, wind_mps, wind_dir_deg, condition
 		FROM forecast WHERE source=? AND ts>=? AND ts<? ORDER BY ts`,
 		source, isoUTC(from), isoUTC(to))
 	if err != nil {
@@ -489,17 +494,18 @@ func (s *Store) Forecast(source string, from, to time.Time) ([]forecast.Point, s
 	var out []forecast.Point
 	for rows.Next() {
 		var (
-			p                                      forecast.Point
-			tsS                                    string
-			temp, hum, pres, precip, wind, windDir sql.NullFloat64
-			cond                                   sql.NullString
+			p                                                 forecast.Point
+			tsS                                               string
+			temp, hum, pres, precip, pprob, cloud, wind, wdir sql.NullFloat64
+			cond                                              sql.NullString
 		)
-		if err := rows.Scan(&tsS, &temp, &hum, &pres, &precip, &wind, &windDir, &cond); err != nil {
+		if err := rows.Scan(&tsS, &temp, &hum, &pres, &precip, &pprob, &cloud, &wind, &wdir, &cond); err != nil {
 			return nil, source, err
 		}
 		p.TS, _ = time.Parse(time.RFC3339, tsS)
 		p.TempC, p.HumidityPct, p.PressureHpa = nullF(temp), nullF(hum), nullF(pres)
-		p.PrecipMm, p.WindMps, p.WindDirDeg = nullF(precip), nullF(wind), nullF(windDir)
+		p.PrecipMm, p.PrecipProb, p.CloudPct = nullF(precip), nullF(pprob), nullF(cloud)
+		p.WindMps, p.WindDirDeg = nullF(wind), nullF(wdir)
 		p.Condition = cond.String
 		out = append(out, p)
 	}

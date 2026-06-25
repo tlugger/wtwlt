@@ -63,7 +63,7 @@ func Load() Config {
 
 		ForecastProvider: getenv("WTWLT_FORECAST_PROVIDER", "openmeteo"),
 		ForecastMinutes:  getenvInt("WTWLT_FORECAST_MINUTES", 60),
-		Lat:              getenvFloat("WTWLT_LAT", 39.7392), // Denver, CO
-		Lon:              getenvFloat("WTWLT_LON", -104.9903),
+		Lat:              getenvFloat("WTWLT_LAT", 0), // set via WTWLT_LAT/WTWLT_LON; 0 = forecast off
+		Lon:              getenvFloat("WTWLT_LON", 0),
 	}
 }

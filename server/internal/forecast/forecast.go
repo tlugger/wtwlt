@@ -26,6 +26,8 @@ type Point struct {
 	HumidityPct *float64
 	PressureHpa *float64
 	PrecipMm    *float64
+	PrecipProb  *float64 // probability of precipitation, %
+	CloudPct    *float64 // total cloud cover, %
 	WindMps     *float64
 	WindDirDeg  *float64
 	Condition   string // normalized sky/precip condition (see Condition* below)

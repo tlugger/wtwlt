@@ -32,7 +32,7 @@ SQLite (WAL mode), and an HTTP server goroutine that reads from it.
 | `WTWLT_DB_PATH` | `./wtwlt.db` | SQLite file (or `$WTWLT_DATA_DIR/wtwlt.db`) |
 | `WTWLT_RETENTION_DAYS` | `90` | prune raw readings older than this (`0` = keep all) |
 | `WTWLT_FORECAST_PROVIDER` | `openmeteo` | forecast source: `openmeteo` \| `nws` \| `none` |
-| `WTWLT_LAT` / `WTWLT_LON` | `39.7392` / `-104.9903` | station coordinates (forecast location) |
+| `WTWLT_LAT` / `WTWLT_LON` | _(unset)_ | station coordinates; **required** to enable the forecast (blank = off) |
 | `WTWLT_FORECAST_MINUTES` | `60` | forecast poll interval |
 
 **Forecast overlay:** on a timer the service fetches a near-term hourly forecast
@@ -40,11 +40,16 @@ from a keyless provider and stores it (in metric/SI) in a separate `forecast`
 table — sensor tables hold measured data only. The dashboard draws it as a
 dashed, muted projection continuing each chart past "now". Providers are
 swappable: **Open-Meteo** (default; one keyless call, covers every field
-including pressure) or **NWS/NOAA** (official US source, also keyless, but its
-hourly product carries no barometric pressure or precip amount — those publish
-as `null`). Set `WTWLT_FORECAST_PROVIDER=none` to disable. A normalized
-condition (clear/cloudy/rain/…) is derived per hour and drives the dashboard's
-forecast tiles (4-hour segments on the 24h view, daily otherwise).
+including pressure, precip probability and cloud cover) or **NWS/NOAA**
+(official US source, also keyless, but its hourly product carries no barometric
+pressure, precip amount, or cloud cover — those publish as `null`). Set
+`WTWLT_FORECAST_PROVIDER=none`, or leave `WTWLT_LAT`/`WTWLT_LON` unset, to
+disable. A normalized condition (clear/cloudy/rain/…) is derived per hour and
+drives the dashboard's forecast tiles (4-hour segments on the 24h view, daily
+otherwise). The lead chart can also project rain-chance and cloud-cover. The
+coordinates are reverse-geocoded (keyless OpenStreetMap Nominatim) to a coarse
+city/state label shown on the dashboard — the exact lat/lon are never exposed
+to the client.
 
 **Rollups & retention:** every 10 minutes the service recomputes hourly/daily
 aggregates from raw into `readings_hourly` / `readings_daily`, then prunes raw
