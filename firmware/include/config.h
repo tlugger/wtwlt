@@ -35,15 +35,15 @@ static const uint16_t MQTT_BUFFER_SIZE = 512;  // payload is larger than PubSubC
 // Source: SparkFun MicroMod Weather Carrier hookup guide.
 // ---------------------------------------------------------------------------
 static const uint8_t WIND_DIR_PIN   = 35;  // A1, ADC1 (analog vane) — ADC1 is WiFi-safe
-static const uint8_t WIND_SPEED_PIN = 23;  // D0  (anemometer reed switch)
-static const uint8_t RAIN_PIN       = 27;  // D1  (rain gauge reed switch)
-static const uint8_t SOIL_PIN       = 39;  // A0, ADC1 (analog soil moisture terminal)
+static const uint8_t WIND_SPEED_PIN = 14;  // D0 (anemometer reed switch). NOT 23 — that's SPI MOSI.
+static const uint8_t RAIN_PIN       = 27;  // D1 (rain gauge reed switch)
+static const uint8_t SOIL_PIN       = 34;  // A0, ADC1 (analog soil moisture signal)
+static const uint8_t SOIL_POWER_PIN = 4;   // G0 — powers the soil sensor; gated HIGH only while reading
 
 // AS3935 lightning detector — SPI, chip select on G1/BUS1.
 static const uint8_t LIGHTNING_CS_PIN  = 12;
-// VERIFY: AS3935 interrupt routing is not confirmed in the hookup guide.
-// Confirm against your board before trusting lightning events.
-static const uint8_t LIGHTNING_INT_PIN = 4;
+// Interrupt on G3 (MicroMod pad 46 "LIGHTNING_INT") = GPIO 17.
+static const uint8_t LIGHTNING_INT_PIN = 17;
 
 // I2C addresses (onboard)
 static const uint8_t BME280_ADDR   = 0x77;
@@ -57,23 +57,59 @@ static const uint8_t VEML6075_ADDR = 0x10;
 #define ENABLE_LIGHTNING 1
 #define ENABLE_SOIL      1
 // Log all responding I2C addresses at boot (bench bring-up diagnostic).
-#define DEBUG_I2C_SCAN   1
+#define DEBUG_I2C_SCAN   0
+// Stream raw sensor values over serial at 5 Hz for bench calibration
+// (vane ADC, soil ADC, wind/rain counts, pin states). Turn off for normal operation.
+#define DEBUG_RAW_SENSORS 0
 // Publish disturber/noise lightning events too (else only real strikes)?
 #define LIGHTNING_REPORT_NONSTRIKE 0
 
 // ---------------------------------------------------------------------------
-// Weather Meter Kit calibration (SFEWeatherMeterKit defaults shown).
-// vaneADCValues[] must be re-calibrated for the ESP32's 12-bit nonlinear ADC.
+// Weather Meter Kit calibration.
 // ---------------------------------------------------------------------------
 static const float MM_PER_RAIN_COUNT   = 0.2794f;  // mm per bucket tip
 static const float KPH_PER_COUNT_PER_S = 2.4f;     // wind speed per count/sec
 
+// Wind-vane ADC->direction table (12-bit), bench-calibrated on this board by a
+// slow full rotation. Index i corresponds to i*22.5°. Even indices are the 8
+// "strong" single-reed positions (high confidence); odd indices are the narrow
+// two-reed positions (PROVISIONAL — caught as brief samples, refine at mount).
+//
+// NOTE: this is RELATIVE — index 0 is just where the sweep started, not true
+// North, and the rotation direction is unconfirmed. WIND_DIR_OFFSET_DEG aligns
+// it to true North at mount time (see the mount-day procedure below).
+static const uint16_t VANE_ADC_VALUES[16] = {
+  3767,  //  0.0°  (strong)
+  3056,  // 22.5°  (provisional)
+  3382,  // 45.0°  (strong)
+  2526,  // 67.5°  (provisional)
+  2863,  // 90.0°  (strong)
+  1392,  // 112.5° (provisional)
+  1602,  // 135.0° (strong)
+   157,  // 157.5° (provisional)
+   187,  // 180.0° (strong)
+    81,  // 202.5° (provisional)
+   533,  // 225.0° (strong)
+   313,  // 247.5° (provisional)
+   927,  // 270.0° (strong)
+   767,  // 292.5° (provisional)
+  2251,  // 315.0° (strong)
+  2139,  // 337.5° (provisional)
+};
+
+// MOUNT-DAY TODO: after physically mounting the vane, point it at a known
+// heading (phone compass), read the reported direction, and set this offset so
+// reported = true. If direction increases the "wrong way" vs compass, the vane
+// was swept the opposite way — re-calibrate VANE_ADC_VALUES in the other order.
+// Added to the raw vane reading (mod 360).
+static const float WIND_DIR_OFFSET_DEG = 0.0f;
+
 // ---------------------------------------------------------------------------
-// Soil moisture raw(ADC)->% calibration. Bench-calibrate dry/wet endpoints.
-// 12-bit ADC: 0..4095. Typical: higher raw = drier.
+// Soil moisture raw(ADC)->% calibration. Bench-calibrated on this board (powered
+// via SOIL_POWER_PIN): dry air ≈ 0, submerged in water ≈ 618 — higher raw = wetter.
 // ---------------------------------------------------------------------------
-static const int SOIL_RAW_DRY = 3200;  // reading in dry air
-static const int SOIL_RAW_WET = 1300;  // reading fully submerged
+static const int SOIL_RAW_DRY = 0;    // dry (open air)
+static const int SOIL_RAW_WET = 618;  // wet (submerged in water)
 
 // ---------------------------------------------------------------------------
 // Battery monitoring (optional). Set BATTERY_ADC_PIN to a valid pin to enable;

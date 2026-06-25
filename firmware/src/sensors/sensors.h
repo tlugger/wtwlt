@@ -37,4 +37,5 @@ namespace sensors {
   void begin();                          // init every enabled sensor
   SensorReading read();                  // fast read for the 1 Hz tick
   bool pollLightning(LightningEvent &ev); // true if an event is pending
+  void printRaw();                       // bench calibration: dump raw values to serial
 }

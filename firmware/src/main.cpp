@@ -68,6 +68,15 @@ void loop() {
     lastRainTotal = r.totalRainMm;
   }
 
+#if DEBUG_RAW_SENSORS
+  // Faster cadence for bench calibration (catches vane positions during a sweep).
+  static uint32_t lastDbg = 0;
+  if (now - lastDbg >= 200) {
+    lastDbg = now;
+    sensors::printRaw();
+  }
+#endif
+
   // --- 60 s aggregated publish ---
   if (now - lastPublish >= PUBLISH_INTERVAL_MS) {
     lastPublish += PUBLISH_INTERVAL_MS;
