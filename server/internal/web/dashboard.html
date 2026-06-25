@@ -300,9 +300,9 @@ const COND = {
 const COND_SEVERITY = ["clear","partly","cloudy","fog","drizzle","rain","snow","thunder"];
 
 const RANGES = {
-  "24h": { ms: 24*3600e3,  bucket: "raw"  },
-  "7d":  { ms: 7*864e5,    bucket: "hour" },
-  "30d": { ms: 30*864e5,   bucket: "day"  },
+  "24h": { ms: 24*3600e3,  bucket: "raw",  fcCap: 12*3600e3 },
+  "7d":  { ms: 7*864e5,    bucket: "hour", fcCap: 48*3600e3 },
+  "30d": { ms: 30*864e5,   bucket: "day",  fcCap: 72*3600e3 },
 };
 
 // fixed earthy chart series colours (legible on both light & dark themes)
@@ -479,12 +479,21 @@ async function loadLightning() {
 }
 
 /* ── charts ──────────────────────────────────────────────────────── */
+// The x-axis is a real (linear) time axis in epoch-ms, so points are spaced by
+// actual time — a minute of history and an hour of forecast occupy proportional
+// width. Each dataset carries its own {x,y} points; the forecast dataset simply
+// starts where history ends (seam), no null-padding needed.
 let charts = {};
-let lastIso = [];   // full timestamps for the current chart x-axis (for tooltips)
+const tms = iso => new Date(iso).getTime();
 
+function fmtAxis(ms) {
+  const d = new Date(ms);
+  if (state.range === "24h") return d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+  if (state.range === "7d")  return d.toLocaleString([], {weekday:"short", hour:"2-digit"});
+  return d.toLocaleDateString([], {month:"short", day:"numeric"});
+}
 function tipTitle(items) {
-  const iso = lastIso[items[0].dataIndex];
-  return iso ? new Date(iso).toLocaleString([], {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"}) : items[0].label;
+  return new Date(items[0].parsed.x).toLocaleString([], {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"});
 }
 function tipLabel(ctx) {
   return `${ctx.dataset.label}: ${ctx.formattedValue}${ctx.dataset.unit ? " " + ctx.dataset.unit : ""}`;
@@ -492,7 +501,7 @@ function tipLabel(ctx) {
 function baseOpts() {
   return {
     responsive:true, maintainAspectRatio:false,
-    interaction:{ mode:"index", intersect:false },
+    interaction:{ mode:"x", intersect:false },
     plugins:{
       legend:{ labels:{ color:cssVar("--ink-dim"), font:{size:11}, usePointStyle:true } },
       tooltip:{
@@ -503,7 +512,10 @@ function baseOpts() {
       },
     },
     scales:{
-      x:{ ticks:{ color:cssVar("--ink-dim"), font:{size:10}, maxRotation:0, autoSkip:true, maxTicksLimit:8 }, grid:{ color:cssVar("--grid") } },
+      x:{ type:"linear", bounds:"data", offset:false,
+          ticks:{ color:cssVar("--ink-dim"), font:{size:10}, maxRotation:0, autoSkip:true, maxTicksLimit:7,
+                  callback:(v) => fmtAxis(v) },
+          grid:{ color:cssVar("--grid") } },
       y:{ ticks:{ color:cssVar("--ink-dim"), font:{size:10} }, grid:{ color:cssVar("--grid") } },
     },
   };
@@ -511,10 +523,10 @@ function baseOpts() {
 function line(id, datasets, extraY) {
   const o = baseOpts();
   if (extraY) o.scales.y1 = { position:"right", ticks:{ color:cssVar("--ink-dim"), font:{size:10} }, grid:{ drawOnChartArea:false } };
-  charts[id] = new Chart($(id), { type:"line", data:{ labels:[], datasets }, options:o });
+  charts[id] = new Chart($(id), { type:"line", data:{ datasets }, options:o });
 }
 function bar(id, datasets) {
-  charts[id] = new Chart($(id), { type:"bar", data:{ labels:[], datasets }, options:baseOpts() });
+  charts[id] = new Chart($(id), { type:"bar", data:{ datasets }, options:baseOpts() });
 }
 function ds(label, color, yAxis) {
   return { label, data:[], borderColor:color, backgroundColor:color+"33", borderWidth:2,
@@ -548,12 +560,6 @@ function applyChartTheme() {
     c.update("none");
   }
 }
-function bucketLabel(iso) {
-  const d = new Date(iso);
-  if (state.range === "24h") return d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
-  if (state.range === "7d")  return d.toLocaleString([], {weekday:"short", hour:"2-digit"});
-  return d.toLocaleDateString([], {month:"short", day:"numeric"});
-}
 // Fetch history + forecast in parallel, then render every chart from the cache.
 async function loadCharts() {
   await Promise.all([fetchHistory(), fetchForecast()]);
@@ -574,15 +580,12 @@ async function fetchForecast() {
   } catch { state.forecast = { pts: [], units: null, source: "" }; }
 }
 
-// Forecast for the CHART overlay: clamped to 48h ahead, and on day ranges
-// collapsed into daily points so the projected tail stays small.
-function forecastPts() {
+// Forecast resampled to the active range's bucket (daily on the day ranges).
+function forecastResampled() {
   const f = state.forecast; if (!f || !f.pts.length) return [];
-  const cutoff = Date.now() + 48*3600e3;
-  const within = f.pts.filter(p => new Date(p.ts).getTime() <= cutoff);
-  if (RANGES[state.range].bucket !== "day") return within;
+  if (RANGES[state.range].bucket !== "day") return f.pts.slice();
   const days = {};
-  for (const p of within) (days[p.ts.slice(0,10)] ||= []).push(p);
+  for (const p of f.pts) (days[p.ts.slice(0,10)] ||= []).push(p);
   const agg = (arr, k, sum) => {
     const v = arr.map(p => p[k]).filter(x => x != null);
     if (!v.length) return null;
@@ -596,72 +599,72 @@ function forecastPts() {
   }));
 }
 
-// The shared x-axis: history buckets followed by forecast hours strictly after
-// the last reading. H marks the seam (last actual index).
+// History plus a forecast tail whose length adapts to the data: never longer
+// than the history actually shown (so 4h of readings won't sprout a 48h tail),
+// capped per range, with a small floor so there's always a little projection.
 function chartAxis() {
   const hist = state.history ? state.history.pts : [];
-  const last = hist.length ? new Date(hist[hist.length-1].bucket).getTime() : -Infinity;
-  const fc = forecastPts().filter(p => new Date(p.ts).getTime() > last);
-  return { hist, fc, H: hist.length };
+  const cap = RANGES[state.range].fcCap;
+  const now = Date.now();
+  let from = now, tail = Math.min(cap, 3*3600e3);
+  if (hist.length) {
+    from = tms(hist[hist.length-1].bucket);
+    const span = from - tms(hist[0].bucket);
+    tail = Math.min(cap, Math.max(span, 3*3600e3));
+  }
+  const fc = forecastResampled().filter(p => { const t = tms(p.ts); return t > from && t <= from + tail; });
+  return { hist, fc };
 }
 
-// Align an actual series (nulls over the future) and a forecast series (nulls
-// over the past, seeded at the seam so the dashed line continues the solid one).
-function mergeSeries(hist, fc, H, hk, fk) {
-  const actual = hist.map(p => p[hk]).concat(fc.map(() => null));
-  const forecast = new Array(H + fc.length).fill(null);
-  if (H > 0 && fc.length) forecast[H-1] = hist[H-1][hk];   // seam
-  fc.forEach((p, i) => { forecast[H+i] = p[fk]; });
-  return { actual, forecast };
+// {x,y} points for a metric; the forecast series is seeded with the last actual
+// point so its dashed line continues the solid one without a gap.
+function actualXY(hist, key) { return hist.map(p => ({ x: tms(p.bucket), y: p[key] })); }
+function forecastXY(hist, fc, hk, fk) {
+  const out = [];
+  if (hist.length && fc.length) { const lp = hist[hist.length-1]; out.push({ x: tms(lp.bucket), y: lp[hk] }); }
+  for (const p of fc) out.push({ x: tms(p.ts), y: p[fk] });
+  return out;
 }
-
-function renderLine(id, labels, datasets) {
+function setChart(id, datasets) {
   const c = charts[id]; if (!c) return;
-  c.data.labels = labels; c.data.datasets = datasets; c.update("none");
+  c.data.datasets = datasets; c.update("none");
 }
 
 // Rebuild the lower grid (wind / rain / humidity+pressure) with forecast overlays.
 function renderCharts() {
   const u = state.history.units;
-  const { hist, fc, H } = chartAxis();
-  const labels = hist.map(p => bucketLabel(p.bucket)).concat(fc.map(p => bucketLabel(p.ts)));
-  lastIso = hist.map(p => p.bucket).concat(fc.map(p => p.ts));
+  const { hist, fc } = chartAxis();
 
   // wind: avg has a forecast, gust does not
   {
-    const avg = mergeSeries(hist, fc, H, "wind_avg", "wind_avg");
-    const a = ds("Avg", SERIES.wind);  a.data = avg.actual; a.unit = u.speed;
-    const g = ds("Gust", SERIES.gust); g.data = hist.map(p => p.wind_gust).concat(fc.map(() => null)); g.unit = u.speed;
+    const a = ds("Avg", SERIES.wind);  a.data = actualXY(hist, "wind_avg");  a.unit = u.speed;
+    const g = ds("Gust", SERIES.gust); g.data = actualXY(hist, "wind_gust"); g.unit = u.speed;
     const sets = [a, g];
-    if (fc.length) { const fa = fds("Avg", SERIES.wind); fa.data = avg.forecast; fa.unit = u.speed; sets.push(fa); }
-    renderLine("windChart", labels, sets);
+    if (fc.length) { const fa = fds("Avg", SERIES.wind); fa.data = forecastXY(hist, fc, "wind_avg", "wind_avg"); fa.unit = u.speed; sets.push(fa); }
+    setChart("windChart", sets);
   }
   // rain: actual + (if available) forecast precip as a muted bar series
   {
-    const a = { label:"Rain", data: hist.map(p => p.rain).concat(fc.map(() => null)),
-                backgroundColor:SERIES.rain+"cc", borderColor:SERIES.rain, borderWidth:1, unit:u.rain };
+    const a = { label:"Rain", data: actualXY(hist, "rain"), backgroundColor:SERIES.rain+"cc", borderColor:SERIES.rain, borderWidth:1, maxBarThickness:14, unit:u.rain };
     const sets = [a];
-    const hasPrecip = fc.some(p => p.precip != null);
-    if (fc.length && hasPrecip) {
-      sets.push({ label:"Rain (forecast)", data: new Array(H).fill(null).concat(fc.map(p => p.precip)),
-                  backgroundColor:SERIES.rain+"44", borderColor:SERIES.rain+"99", borderWidth:1, unit:u.rain });
+    if (fc.length && fc.some(p => p.precip != null)) {
+      sets.push({ label:"Rain (forecast)", data: fc.map(p => ({ x: tms(p.ts), y: p.precip })),
+                  backgroundColor:SERIES.rain+"44", borderColor:SERIES.rain+"99", borderWidth:1, maxBarThickness:14, unit:u.rain });
     }
     charts.rainChart.options.plugins.legend.display = sets.length > 1;
-    renderLine("rainChart", labels, sets);
+    setChart("rainChart", sets);
   }
   // humidity (left axis) + pressure (right axis), each with a forecast overlay
   {
-    const hum = mergeSeries(hist, fc, H, "humidity", "humidity");
-    const pre = mergeSeries(hist, fc, H, "pressure", "pressure");
-    const dh = ds("Humidity", SERIES.humidity, "y");  dh.data = hum.actual; dh.unit = u.humidity;
-    const dp = ds("Pressure", SERIES.pressure, "y1"); dp.data = pre.actual; dp.unit = u.pressure;
+    const dh = ds("Humidity", SERIES.humidity, "y");  dh.data = actualXY(hist, "humidity"); dh.unit = u.humidity;
+    const dp = ds("Pressure", SERIES.pressure, "y1"); dp.data = actualXY(hist, "pressure"); dp.unit = u.pressure;
     const sets = [dh, dp];
     if (fc.length) {
-      const fh = fds("Humidity", SERIES.humidity, "y");  fh.data = hum.forecast; fh.unit = u.humidity;
-      const fp = fds("Pressure", SERIES.pressure, "y1"); fp.data = pre.forecast; fp.unit = u.pressure;
+      const fh = fds("Humidity", SERIES.humidity, "y");  fh.data = forecastXY(hist, fc, "humidity", "humidity"); fh.unit = u.humidity;
+      const fp = fds("Pressure", SERIES.pressure, "y1"); fp.data = forecastXY(hist, fc, "pressure", "pressure"); fp.unit = u.pressure;
       sets.push(fh, fp);
     }
-    renderLine("hpChart", labels, sets);
+    setChart("hpChart", sets);
   }
   renderMain();
 }
@@ -672,18 +675,16 @@ function renderMain() {
   const cfg = MAIN_METRICS[state.mainMetric] || MAIN_METRICS.temp;
   const unit = h.units[cfg.unit];
   const c = charts.mainChart;
-  const { hist, fc, H } = chartAxis();
+  const { hist, fc } = chartAxis();
   const s = cfg.series[0];
   const fk = FORECAST_KEYS[state.mainMetric];
 
-  c.data.labels = hist.map(p => bucketLabel(p.bucket)).concat(fc.map(p => bucketLabel(p.ts)));
   const d = ds(s.label, s.color);
   d.fill = cfg.fill; d.unit = unit;
-  d.data = hist.map(p => p[s.key]).concat(fc.map(() => null));
+  d.data = actualXY(hist, s.key);
   const sets = [d];
   if (fk && fc.length) {
-    const m = mergeSeries(hist, fc, H, s.key, fk);
-    const fd = fds(s.label, s.color); fd.unit = unit; fd.data = m.forecast;
+    const fd = fds(s.label, s.color); fd.unit = unit; fd.data = forecastXY(hist, fc, s.key, fk);
     sets.push(fd);
   }
   c.options.plugins.legend.display = sets.length > 1;
