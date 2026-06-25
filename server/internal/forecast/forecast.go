@@ -61,7 +61,13 @@ const defaultUA = "wtwlt-weather-station (github.com/tlugger/wtwlt)"
 // for "none"/"" — forecasts disabled. hc may be nil (a default client is used).
 func New(name string, hc *http.Client) (Provider, error) {
 	if hc == nil {
-		hc = &http.Client{Timeout: 15 * time.Second}
+		// Generous timeouts: a Pi's uplink can be slow to bring up TLS just after
+		// boot (default TLSHandshakeTimeout is only 10s), and the 7-day, multi-
+		// field query can be slow to come back. The poller retries on failure.
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.TLSHandshakeTimeout = 30 * time.Second
+		tr.ResponseHeaderTimeout = 45 * time.Second // server time to build the response
+		hc = &http.Client{Timeout: 60 * time.Second, Transport: tr}
 	}
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "", "none", "off":

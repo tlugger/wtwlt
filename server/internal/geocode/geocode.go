@@ -28,7 +28,9 @@ func Reverse(ctx context.Context, lat, lon float64) (string, error) {
 		return "", err
 	}
 	req.Header.Set("User-Agent", userAgent) // Nominatim requires an identifying UA
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSHandshakeTimeout = 30 * time.Second // a Pi's uplink can be slow just after boot
+	resp, err := (&http.Client{Timeout: 60 * time.Second, Transport: tr}).Do(req)
 	if err != nil {
 		return "", err
 	}
