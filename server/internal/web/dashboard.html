@@ -237,7 +237,6 @@
         <h2 id="mainTitle">Temperature</h2>
         <div class="metric-tabs" id="metricTabs" role="group" aria-label="Chart metric">
           <span class="mtab active" data-m="temp" role="button" tabindex="0">Temp</span>
-          <span class="mtab" data-m="uv" role="button" tabindex="0">UV</span>
           <span class="mtab" data-m="humidity" role="button" tabindex="0">Humidity</span>
           <span class="mtab" data-m="pressure" role="button" tabindex="0">Pressure</span>
         </div>
@@ -279,13 +278,12 @@ const state = {
 // the toggle-able lead chart: each metric maps to history fields + colours
 const MAIN_METRICS = {
   temp:     { label:"Temperature", unit:"temp",     fill:true,  series:[{key:"temp",      label:"Temp",     color:"#C97B5A"}] },
-  uv:       { label:"UV Index",    unit:"uv",       fill:true,  series:[{key:"uv",        label:"UV Index", color:"#D9A441"}] },
   humidity: { label:"Humidity",    unit:"humidity", fill:true,  series:[{key:"humidity",  label:"Humidity", color:"#6B8E9E"}] },
   pressure: { label:"Pressure",    unit:"pressure", fill:false, series:[{key:"pressure",  label:"Pressure", color:"#9C8AA8"}] },
 };
 
-// which forecast field backs each lead metric (UV has no forecast).
-const FORECAST_KEYS = { temp:"temp", humidity:"humidity", pressure:"pressure", uv:null };
+// which forecast field backs each lead metric.
+const FORECAST_KEYS = { temp:"temp", humidity:"humidity", pressure:"pressure" };
 
 // normalized condition -> icon (day/night variants) + label. Order of
 // COND_SEVERITY is least→most significant, used to pick a tile's headline.
@@ -394,7 +392,7 @@ async function loadCurrent() {
     tile("Humidity", `${fmtNum(c.humidity)}${u.humidity}`, ""),
     tile("Pressure", `${fmtNum(c.pressure)}`, u.pressure),
     tile("Rain (1m)", `${fmtNum(c.rain,2)}`, u.rain),
-    tile("UV index", `${fmtNum(c.uv)}`, uvWord(c.uv)),
+    tile("Dew point", `${fmtNum(c.dewpoint)}°`, dewComfort(c.dewpoint)),
     tile("Soil", `${fmtNum(c.soil)}${u.soil}`, "moisture"),
   ].join("");
 
@@ -420,10 +418,15 @@ function compassSVG(deg, card) {
     </g>
   </svg>`;
 }
-function uvWord(uv) {
-  if (uv == null) return "";
-  if (uv < 3) return "low"; if (uv < 6) return "moderate"; if (uv < 8) return "high";
-  return uv < 11 ? "very high" : "extreme";
+// Comfort descriptor for a dew point, thresholds in the active unit system.
+function dewComfort(dp) {
+  if (dp == null) return "";
+  const t = state.units === "imperial" ? [55,60,65,70] : [13,16,18,21];
+  if (dp < t[0]) return "dry";
+  if (dp < t[1]) return "comfortable";
+  if (dp < t[2]) return "sticky";
+  if (dp < t[3]) return "muggy";
+  return "oppressive";
 }
 function setStatus(online, text) {
   const el = $("status");
