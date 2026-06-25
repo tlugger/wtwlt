@@ -326,7 +326,7 @@ func TestForecastEndpoint(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Hour)
 	// One in-window future hour, one past hour (should be filtered out).
 	pts := []forecast.Point{
-		{TS: now.Add(time.Hour), TempC: fp(20), HumidityPct: fp(50), PressureHpa: fp(840), PrecipMm: fp(0), WindMps: fp(5), WindDirDeg: fp(270), Condition: forecast.CondRain},
+		{TS: now.Add(time.Hour), TempC: fp(20), HumidityPct: fp(50), PressureHpa: fp(840), PrecipMm: fp(0), PrecipProb: fp(70), CloudPct: fp(85), WindMps: fp(5), WindDirDeg: fp(270), Condition: forecast.CondRain},
 		{TS: now.Add(-2 * time.Hour), TempC: fp(10)},
 	}
 	if err := st.UpsertForecast("openmeteo", pts, now); err != nil {
@@ -352,6 +352,12 @@ func TestForecastEndpoint(t *testing.T) {
 	if resp.Points[0].Condition != forecast.CondRain {
 		t.Errorf("condition = %q, want rain", resp.Points[0].Condition)
 	}
+	if resp.Points[0].PrecipProb == nil || *resp.Points[0].PrecipProb != 70 {
+		t.Errorf("precip_prob = %v, want 70", resp.Points[0].PrecipProb)
+	}
+	if resp.Points[0].Cloud == nil || *resp.Points[0].Cloud != 85 {
+		t.Errorf("cloud_pct = %v, want 85", resp.Points[0].Cloud)
+	}
 	if resp.Units.Temp != "°C" {
 		t.Errorf("units.temp = %q", resp.Units.Temp)
 	}
@@ -365,6 +371,32 @@ func TestForecastEndpoint(t *testing.T) {
 	}
 	if imp.Units.Speed != "mph" {
 		t.Errorf("units.speed = %q", imp.Units.Speed)
+	}
+}
+
+func TestForecastLocation(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "loc.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	srv := New(st)
+	srv.SetLocation("Thornton, Colorado")
+	h := srv.Handler()
+
+	rr := do(t, h, "/api/forecast")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d", rr.Code)
+	}
+	body := rr.Body.String()
+	var resp forecastResp
+	decode(t, rr, &resp)
+	if resp.Location != "Thornton, Colorado" {
+		t.Errorf("location = %q", resp.Location)
+	}
+	// Exact coordinates must never reach the client.
+	if strings.Contains(body, `"lat"`) || strings.Contains(body, `"lon"`) {
+		t.Errorf("response must not expose lat/lon: %s", body)
 	}
 }
 

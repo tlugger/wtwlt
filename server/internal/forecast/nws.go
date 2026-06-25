@@ -75,6 +75,9 @@ type nwsForecast struct {
 			RelativeHumidity struct {
 				Value *float64 `json:"value"`
 			} `json:"relativeHumidity"`
+			ProbabilityOfPrecipitation struct {
+				Value *float64 `json:"value"`
+			} `json:"probabilityOfPrecipitation"`
 			WindSpeed     string `json:"windSpeed"`
 			WindDirection string `json:"windDirection"`
 			ShortForecast string `json:"shortForecast"`
@@ -131,10 +134,11 @@ func parseNWSForecast(body []byte) ([]Point, error) {
 			TS:          t.UTC(),
 			TempC:       ptr(tempC),
 			HumidityPct: p.RelativeHumidity.Value,
+			PrecipProb:  p.ProbabilityOfPrecipitation.Value,
 			WindMps:     parseWindSpeed(p.WindSpeed),
 			WindDirDeg:  cardinalToDeg(p.WindDirection),
 			Condition:   shortForecastCondition(p.ShortForecast),
-			// PressureHpa, PrecipMm: not provided by the NWS hourly product.
+			// PressureHpa, PrecipMm, CloudPct: not in the NWS hourly product.
 		})
 	}
 	if len(out) == 0 {

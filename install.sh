@@ -68,10 +68,12 @@ WTWLT_MQTT_PASS=
 WTWLT_RETENTION_DAYS=90
 
 # Forecast overlay (keyless). Provider: openmeteo (default) | nws | none.
-# Set the station's coordinates so the projection matches your location.
+# Set the station's coordinates to enable it (blank = forecast off). They are
+# used only to fetch the forecast and to derive a coarse city label; the exact
+# coordinates are never shown in the dashboard.
 WTWLT_FORECAST_PROVIDER=openmeteo
-WTWLT_LAT=39.7392
-WTWLT_LON=-104.9903
+WTWLT_LAT=
+WTWLT_LON=
 EOF
   chmod 600 "$INSTALL_DIR/.env"
   ok "Created $INSTALL_DIR/.env (local broker, port 8080, 90-day retention)"

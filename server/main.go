@@ -15,6 +15,7 @@ import (
 
 	"github.com/tlugger/wtwlt/server/internal/config"
 	"github.com/tlugger/wtwlt/server/internal/forecast"
+	"github.com/tlugger/wtwlt/server/internal/geocode"
 	"github.com/tlugger/wtwlt/server/internal/ingest"
 	"github.com/tlugger/wtwlt/server/internal/store"
 	"github.com/tlugger/wtwlt/server/internal/web"
@@ -77,11 +78,32 @@ func main() {
 		}
 	}()
 
+	websrv := web.New(st)
+
 	// Forecast overlay: poll a keyless provider on a timer, store separately
-	// from sensor data. Network failures are non-fatal (logged, retried next tick).
-	if prov, err := forecast.New(cfg.ForecastProvider, nil); err != nil {
+	// from sensor data. Requires coordinates (WTWLT_LAT/WTWLT_LON); network
+	// failures are non-fatal (logged, retried next tick).
+	prov, err := forecast.New(cfg.ForecastProvider, nil)
+	if err != nil {
 		log.Printf("forecast: %v (overlay disabled)", err)
-	} else if prov != nil {
+	}
+	if prov != nil && cfg.Lat == 0 && cfg.Lon == 0 {
+		log.Printf("forecast: WTWLT_LAT/WTWLT_LON not set — overlay disabled")
+		prov = nil
+	}
+	if prov != nil {
+		// Resolve a coarse place label (city/state) for the dashboard, once.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if loc, err := geocode.Reverse(ctx, cfg.Lat, cfg.Lon); err != nil {
+				log.Printf("geocode: %v", err)
+			} else {
+				websrv.SetLocation(loc)
+				log.Printf("forecast location: %s", loc)
+			}
+		}()
+
 		fetchForecast := func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -116,7 +138,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           web.New(st).Handler(),
+		Handler:           websrv.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

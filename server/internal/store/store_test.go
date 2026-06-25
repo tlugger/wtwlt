@@ -308,8 +308,8 @@ func TestForecastUpsertAndRead(t *testing.T) {
 	fetched := base.Add(-time.Minute)
 
 	pts := []forecast.Point{
-		{TS: base, TempC: f(18), HumidityPct: f(55), PressureHpa: f(840), PrecipMm: f(0), WindMps: f(3), WindDirDeg: f(270), Condition: forecast.CondClear},
-		{TS: base.Add(time.Hour), TempC: f(20), WindMps: f(4)}, // pressure/precip absent -> nil
+		{TS: base, TempC: f(18), HumidityPct: f(55), PressureHpa: f(840), PrecipMm: f(0), PrecipProb: f(20), CloudPct: f(40), WindMps: f(3), WindDirDeg: f(270), Condition: forecast.CondClear},
+		{TS: base.Add(time.Hour), TempC: f(20), WindMps: f(4)}, // pressure/precip/prob/cloud absent -> nil
 	}
 	if err := s.UpsertForecast("openmeteo", pts, fetched); err != nil {
 		t.Fatalf("UpsertForecast: %v", err)
@@ -332,8 +332,14 @@ func TestForecastUpsertAndRead(t *testing.T) {
 	if got[0].Condition != forecast.CondClear {
 		t.Errorf("condition = %q, want clear", got[0].Condition)
 	}
-	if got[1].PressureHpa != nil {
-		t.Errorf("absent pressure should be nil, got %v", got[1].PressureHpa)
+	if got[0].PrecipProb == nil || *got[0].PrecipProb != 20 {
+		t.Errorf("precip_prob = %v, want 20", got[0].PrecipProb)
+	}
+	if got[0].CloudPct == nil || *got[0].CloudPct != 40 {
+		t.Errorf("cloud_pct = %v, want 40", got[0].CloudPct)
+	}
+	if got[1].PressureHpa != nil || got[1].PrecipProb != nil || got[1].CloudPct != nil {
+		t.Errorf("absent fields should be nil, got pres=%v prob=%v cloud=%v", got[1].PressureHpa, got[1].PrecipProb, got[1].CloudPct)
 	}
 
 	// Re-upsert the same hour with a revised value -> REPLACE, not duplicate.

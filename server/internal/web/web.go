@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -30,9 +31,26 @@ const defaultStation = "wtwlt-01"
 
 type Server struct {
 	store *store.Store
+
+	mu       sync.RWMutex
+	location string // coarse place label (e.g. "Thornton, Colorado"); resolved async
 }
 
 func New(st *store.Store) *Server { return &Server{store: st} }
+
+// SetLocation records the coarse forecast-location label shown on the dashboard.
+// Exact coordinates are never exposed to the client.
+func (s *Server) SetLocation(loc string) {
+	s.mu.Lock()
+	s.location = loc
+	s.mu.Unlock()
+}
+
+func (s *Server) getLocation() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.location
+}
 
 // Handler returns the HTTP routes (stdlib mux; Go 1.22+ method+path patterns).
 func (s *Server) Handler() http.Handler {
@@ -107,19 +125,22 @@ type historyResp struct {
 }
 
 type forecastPoint struct {
-	TS        string   `json:"ts"`
-	Temp      *float64 `json:"temp"`
-	Humidity  *float64 `json:"humidity"`
-	Pressure  *float64 `json:"pressure"`
-	Precip    *float64 `json:"precip"`
-	WindAvg   *float64 `json:"wind_avg"`
-	WindDir   *float64 `json:"wind_dir"`
-	Condition string   `json:"condition"`
+	TS         string   `json:"ts"`
+	Temp       *float64 `json:"temp"`
+	Humidity   *float64 `json:"humidity"`
+	Pressure   *float64 `json:"pressure"`
+	Precip     *float64 `json:"precip"`
+	PrecipProb *float64 `json:"precip_prob"`
+	Cloud      *float64 `json:"cloud_pct"`
+	WindAvg    *float64 `json:"wind_avg"`
+	WindDir    *float64 `json:"wind_dir"`
+	Condition  string   `json:"condition"`
 }
 
 type forecastResp struct {
 	Station    string          `json:"station"`
 	Source     string          `json:"source"`
+	Location   string          `json:"location"`
 	From       string          `json:"from"`
 	To         string          `json:"to"`
 	UnitSystem string          `json:"unit_system"`
@@ -272,18 +293,21 @@ func (s *Server) forecast(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := forecastResp{
 		Station: station(r), Source: source,
-		From: from.Format(time.RFC3339), To: to.Format(time.RFC3339),
+		Location: s.getLocation(),
+		From:     from.Format(time.RFC3339), To: to.Format(time.RFC3339),
 		UnitSystem: sys.Name(), Units: sys.Labels(),
 		Points: lo.Map(pts, func(p forecast.Point, _ int) forecastPoint {
 			return forecastPoint{
-				TS:        p.TS.Format(time.RFC3339),
-				Temp:      sys.Temp(p.TempC),
-				Humidity:  sys.Pct(p.HumidityPct),
-				Pressure:  sys.Pressure(p.PressureHpa),
-				Precip:    sys.Rain(p.PrecipMm),
-				WindAvg:   sys.Speed(p.WindMps),
-				WindDir:   p.WindDirDeg,
-				Condition: p.Condition,
+				TS:         p.TS.Format(time.RFC3339),
+				Temp:       sys.Temp(p.TempC),
+				Humidity:   sys.Pct(p.HumidityPct),
+				Pressure:   sys.Pressure(p.PressureHpa),
+				Precip:     sys.Rain(p.PrecipMm),
+				PrecipProb: sys.Pct(p.PrecipProb),
+				Cloud:      sys.Pct(p.CloudPct),
+				WindAvg:    sys.Speed(p.WindMps),
+				WindDir:    p.WindDirDeg,
+				Condition:  p.Condition,
 			}
 		}),
 	}
