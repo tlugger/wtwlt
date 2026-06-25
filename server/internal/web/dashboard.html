@@ -284,7 +284,7 @@ const MAIN_METRICS = {
   humidity: { label:"Humidity",    unit:"humidity", fill:true,  series:[{key:"humidity",      label:"Humidity",    color:"#6B8E9E"}] },
   pressure: { label:"Pressure",    unit:"pressure", fill:false, series:[{key:"pressure",      label:"Pressure",    color:"#9C8AA8"}] },
   precip:   { label:"Rain chance", unitText:"%",    fill:false, series:[{key:"precip_chance", label:"Rain chance", color:"#7FA6A6"}] },
-  cloud:    { label:"Cloud cover", unitText:"%",    fill:true,  series:[{key:"cloud_pct",     label:"Cloud cover", color:"#9AA7B0"}] },
+  cloud:    { label:"Cloud cover", unitText:"%",    fill:true,  forecastOnly:true, series:[{key:"cloud_pct", label:"Cloud cover", color:"#9AA7B0"}] },
 };
 
 // which forecast field backs each lead metric (precip/cloud are forward-looking).
@@ -718,13 +718,22 @@ function renderMain() {
   const s = cfg.series[0];
   const fk = FORECAST_KEYS[state.mainMetric];
 
-  const d = ds(s.label, s.color);
-  d.fill = cfg.fill; d.unit = unit;
-  d.data = actualXY(hist, s.key);
-  const sets = [d];
-  if (fk && fc.length) {
-    const fd = fds(s.label, s.color); fd.unit = unit; fd.data = forecastXY(hist, fc, s.key, fk);
-    sets.push(fd);
+  let sets;
+  if (cfg.forecastOnly) {
+    // No sensor equivalent — render only the forecast so it spans the full axis
+    // (an empty actual series would stretch the axis across the history range).
+    const fd = fds(s.label, s.color); fd.unit = unit;
+    fd.data = fc.map(p => ({ x: tms(p.ts), y: p[fk] }));
+    sets = [fd];
+  } else {
+    const d = ds(s.label, s.color);
+    d.fill = cfg.fill; d.unit = unit;
+    d.data = actualXY(hist, s.key);
+    sets = [d];
+    if (fk && fc.length) {
+      const fd = fds(s.label, s.color); fd.unit = unit; fd.data = forecastXY(hist, fc, s.key, fk);
+      sets.push(fd);
+    }
   }
   c.options.plugins.legend.display = false;   // the title names the metric
   c.data.datasets = sets;
