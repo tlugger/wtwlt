@@ -123,8 +123,9 @@ SensorReading read() {
 #if ENABLE_BME
   if (bmeOk) {
     r.haveBME      = true;
-    r.tempC        = bme.readTempC();
-    r.humidityPct  = bme.readFloatHumidity();
+    r.tempC        = bme.readTempC() - TEMP_OFFSET_C;
+    float rh       = bme.readFloatHumidity() + HUMIDITY_OFFSET_PCT;
+    r.humidityPct  = rh < 0.0f ? 0.0f : (rh > 100.0f ? 100.0f : rh);
     r.pressureHpa  = bme.readFloatPressure() / 100.0f;  // Pa -> hPa
   }
 #endif
