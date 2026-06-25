@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tlugger/wtwlt/server/internal/config"
+	"github.com/tlugger/wtwlt/server/internal/forecast"
 	"github.com/tlugger/wtwlt/server/internal/ingest"
 	"github.com/tlugger/wtwlt/server/internal/store"
 	"github.com/tlugger/wtwlt/server/internal/web"
@@ -75,6 +76,43 @@ func main() {
 			runMaintenance()
 		}
 	}()
+
+	// Forecast overlay: poll a keyless provider on a timer, store separately
+	// from sensor data. Network failures are non-fatal (logged, retried next tick).
+	if prov, err := forecast.New(cfg.ForecastProvider, nil); err != nil {
+		log.Printf("forecast: %v (overlay disabled)", err)
+	} else if prov != nil {
+		fetchForecast := func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			pts, err := prov.Fetch(ctx, cfg.Lat, cfg.Lon)
+			if err != nil {
+				log.Printf("forecast: fetch (%s): %v", prov.Name(), err)
+				return
+			}
+			now := time.Now().UTC()
+			if err := st.UpsertForecast(prov.Name(), pts, now); err != nil {
+				log.Printf("forecast: store: %v", err)
+				return
+			}
+			if _, err := st.PruneForecast(now); err != nil {
+				log.Printf("forecast: prune: %v", err)
+			}
+			log.Printf("forecast: stored %d hours from %s", len(pts), prov.Name())
+		}
+		interval := cfg.ForecastMinutes
+		if interval <= 0 {
+			interval = 60
+		}
+		go fetchForecast() // initial fetch off the startup path
+		go func() {
+			t := time.NewTicker(time.Duration(interval) * time.Minute)
+			defer t.Stop()
+			for range t.C {
+				fetchForecast()
+			}
+		}()
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

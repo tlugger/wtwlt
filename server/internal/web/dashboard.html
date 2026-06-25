@@ -121,6 +121,20 @@
   .stat .value { font-size:28px; font-weight:700; color:var(--accent-2); overflow-wrap:anywhere; }
   .stat .label { font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-dim); margin-top:4px; }
 
+  /* forecast strip */
+  #forecastStrip { margin-bottom:16px; }
+  .fstrip-head { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; }
+  .fstrip-head h2 { margin:0; }
+  .fstrip-src { font-size:11px; color:var(--ink-dim); }
+  .forecast-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:12px; }
+  .ftile { padding:14px 8px; text-align:center; min-width:0; display:flex; flex-direction:column; align-items:center; gap:3px; }
+  .ftile .ft-when { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--ink-dim); }
+  .ftile .ft-ico { font-size:30px; line-height:1.1; }
+  .ftile .ft-temp { font-size:15px; font-weight:700; color:var(--accent-2); }
+  .ftile .ft-temp .lo { color:var(--ink-dim); font-weight:600; }
+  .ftile .ft-cond { font-size:11px; color:var(--ink); overflow-wrap:anywhere; }
+  .ftile .ft-sub { font-size:10px; color:var(--accent); }
+
   /* range chips */
   .chips { display:flex; gap:8px; margin-bottom:14px; }
   .chip { font-size:12px; font-weight:600; padding:6px 14px; border-radius:20px; border:1px solid var(--card-border); background:var(--card-bg); color:var(--ink-dim); cursor:pointer; transition:all .15s; }
@@ -153,6 +167,8 @@
     .grid { grid-template-columns:1fr; }
     .now .big { font-size:52px; }
     .tiles { grid-template-columns:repeat(2,1fr); }
+    .forecast-strip { grid-template-columns:repeat(3,1fr); }
+    .ftile .ft-ico { font-size:26px; }
     .chart-wrap { height:200px; }
   }
   @media (max-width:430px) {
@@ -208,6 +224,12 @@
   </div>
   <section class="stats" id="stats"></section>
 
+  <!-- Forecast strip (projected conditions; granularity follows the range) -->
+  <section id="forecastStrip" hidden>
+    <div class="fstrip-head"><h2>Forecast</h2><span class="fstrip-src" id="forecastSrc"></span></div>
+    <div class="forecast-strip" id="forecastTiles"></div>
+  </section>
+
   <!-- Charts -->
   <section class="grid">
     <div class="panel wide">
@@ -215,7 +237,6 @@
         <h2 id="mainTitle">Temperature</h2>
         <div class="metric-tabs" id="metricTabs" role="group" aria-label="Chart metric">
           <span class="mtab active" data-m="temp" role="button" tabindex="0">Temp</span>
-          <span class="mtab" data-m="uv" role="button" tabindex="0">UV</span>
           <span class="mtab" data-m="humidity" role="button" tabindex="0">Humidity</span>
           <span class="mtab" data-m="pressure" role="button" tabindex="0">Pressure</span>
         </div>
@@ -251,15 +272,32 @@ const state = {
   themeOverride: null,   // ?theme=clear-day|dusk|night|rain|storm pins the look
   mainMetric: "temp",    // which metric the lead chart shows
   history: null,         // cached {pts, units} so metric switches don't refetch
+  forecast: null,        // cached {pts, units} forecast overlay (now..now+48h)
 };
 
 // the toggle-able lead chart: each metric maps to history fields + colours
 const MAIN_METRICS = {
   temp:     { label:"Temperature", unit:"temp",     fill:true,  series:[{key:"temp",      label:"Temp",     color:"#C97B5A"}] },
-  uv:       { label:"UV Index",    unit:"uv",       fill:true,  series:[{key:"uv",        label:"UV Index", color:"#D9A441"}] },
   humidity: { label:"Humidity",    unit:"humidity", fill:true,  series:[{key:"humidity",  label:"Humidity", color:"#6B8E9E"}] },
   pressure: { label:"Pressure",    unit:"pressure", fill:false, series:[{key:"pressure",  label:"Pressure", color:"#9C8AA8"}] },
 };
+
+// which forecast field backs each lead metric.
+const FORECAST_KEYS = { temp:"temp", humidity:"humidity", pressure:"pressure" };
+
+// normalized condition -> icon (day/night variants) + label. Order of
+// COND_SEVERITY is least→most significant, used to pick a tile's headline.
+const COND = {
+  clear:   { day:"☀️", night:"🌙", label:"Clear" },
+  partly:  { day:"⛅", night:"☁️", label:"Partly cloudy" },
+  cloudy:  { day:"☁️", night:"☁️", label:"Cloudy" },
+  fog:     { day:"🌫️", night:"🌫️", label:"Fog" },
+  drizzle: { day:"🌦️", night:"🌧️", label:"Drizzle" },
+  rain:    { day:"🌧️", night:"🌧️", label:"Rain" },
+  snow:    { day:"🌨️", night:"🌨️", label:"Snow" },
+  thunder: { day:"⛈️", night:"⛈️", label:"Thunder" },
+};
+const COND_SEVERITY = ["clear","partly","cloudy","fog","drizzle","rain","snow","thunder"];
 
 const RANGES = {
   "24h": { ms: 24*3600e3,  bucket: "raw"  },
@@ -354,7 +392,7 @@ async function loadCurrent() {
     tile("Humidity", `${fmtNum(c.humidity)}${u.humidity}`, ""),
     tile("Pressure", `${fmtNum(c.pressure)}`, u.pressure),
     tile("Rain (1m)", `${fmtNum(c.rain,2)}`, u.rain),
-    tile("UV index", `${fmtNum(c.uv)}`, uvWord(c.uv)),
+    tile("Dew point", `${fmtNum(c.dewpoint)}°`, dewComfort(c.dewpoint)),
     tile("Soil", `${fmtNum(c.soil)}${u.soil}`, "moisture"),
   ].join("");
 
@@ -380,10 +418,15 @@ function compassSVG(deg, card) {
     </g>
   </svg>`;
 }
-function uvWord(uv) {
-  if (uv == null) return "";
-  if (uv < 3) return "low"; if (uv < 6) return "moderate"; if (uv < 8) return "high";
-  return uv < 11 ? "very high" : "extreme";
+// Comfort descriptor for a dew point, thresholds in the active unit system.
+function dewComfort(dp) {
+  if (dp == null) return "";
+  const t = state.units === "imperial" ? [55,60,65,70] : [13,16,18,21];
+  if (dp < t[0]) return "dry";
+  if (dp < t[1]) return "comfortable";
+  if (dp < t[2]) return "sticky";
+  if (dp < t[3]) return "muggy";
+  return "oppressive";
 }
 function setStatus(online, text) {
   const el = $("status");
@@ -477,6 +520,12 @@ function ds(label, color, yAxis) {
   return { label, data:[], borderColor:color, backgroundColor:color+"33", borderWidth:2,
            tension:0.3, pointRadius:0, pointHoverRadius:4, fill:false, yAxisID:yAxis||"y" };
 }
+// Forecast dataset: same hue, muted + dashed to read as "projected, not measured".
+function fds(label, color, yAxis) {
+  return { label:label+" (forecast)", data:[], borderColor:color+"aa", backgroundColor:"transparent",
+           borderWidth:2, borderDash:[5,4], tension:0.3, pointRadius:0, pointHoverRadius:4,
+           fill:false, yAxisID:yAxis||"y", spanGaps:false };
+}
 function initCharts() {
   line("mainChart", [ds("Temp", MAIN_METRICS.temp.series[0].color)]);
   charts.mainChart.data.datasets[0].fill = true;
@@ -505,52 +554,214 @@ function bucketLabel(iso) {
   if (state.range === "7d")  return d.toLocaleString([], {weekday:"short", hour:"2-digit"});
   return d.toLocaleDateString([], {month:"short", day:"numeric"});
 }
-async function loadHistory() {
+// Fetch history + forecast in parallel, then render every chart from the cache.
+async function loadCharts() {
+  await Promise.all([fetchHistory(), fetchForecast()]);
+  renderForecastTiles();
+  if (state.history) renderCharts();
+}
+async function fetchHistory() {
   const { from, to, bucket } = rangeParams();
-  let h;
-  try { h = await getJSON(`/api/history?station=${STATION}&units=${state.units}&from=${from}&to=${to}&bucket=${bucket}`); }
-  catch { return; }
-  const pts = h.points || [];
-  const labels = pts.map(p => bucketLabel(p.bucket));
-  const u = h.units;
-  lastIso = pts.map(p => p.bucket);
-  state.history = { pts, units: u };
+  try {
+    const h = await getJSON(`/api/history?station=${STATION}&units=${state.units}&from=${from}&to=${to}&bucket=${bucket}`);
+    state.history = { pts: h.points || [], units: h.units };
+  } catch { /* keep last good history */ }
+}
+async function fetchForecast() {
+  try {
+    const f = await getJSON(`/api/forecast?station=${STATION}&units=${state.units}`);
+    state.forecast = { pts: f.points || [], units: f.units, source: f.source };
+  } catch { state.forecast = { pts: [], units: null, source: "" }; }
+}
 
-  // units for tooltips (lower grid)
-  charts.windChart.data.datasets[0].unit = u.speed;
-  charts.windChart.data.datasets[1].unit = u.speed;
-  charts.rainChart.data.datasets[0].unit = u.rain;
-  charts.hpChart.data.datasets[0].unit = u.humidity;
-  charts.hpChart.data.datasets[1].unit = u.pressure;
+// Forecast for the CHART overlay: clamped to 48h ahead, and on day ranges
+// collapsed into daily points so the projected tail stays small.
+function forecastPts() {
+  const f = state.forecast; if (!f || !f.pts.length) return [];
+  const cutoff = Date.now() + 48*3600e3;
+  const within = f.pts.filter(p => new Date(p.ts).getTime() <= cutoff);
+  if (RANGES[state.range].bucket !== "day") return within;
+  const days = {};
+  for (const p of within) (days[p.ts.slice(0,10)] ||= []).push(p);
+  const agg = (arr, k, sum) => {
+    const v = arr.map(p => p[k]).filter(x => x != null);
+    if (!v.length) return null;
+    const t = v.reduce((a,b) => a+b, 0);
+    return sum ? t : t / v.length;
+  };
+  return Object.entries(days).map(([d, arr]) => ({
+    ts: d+"T00:00:00Z",
+    temp: agg(arr,"temp"), humidity: agg(arr,"humidity"), pressure: agg(arr,"pressure"),
+    wind_avg: agg(arr,"wind_avg"), precip: agg(arr,"precip",true),
+  }));
+}
 
-  set("windChart", labels, [pts.map(p => p.wind_avg), pts.map(p => p.wind_gust)]);
-  set("rainChart", labels, [pts.map(p => p.rain)]);
-  set("hpChart",   labels, [pts.map(p => p.humidity), pts.map(p => p.pressure)]);
+// The shared x-axis: history buckets followed by forecast hours strictly after
+// the last reading. H marks the seam (last actual index).
+function chartAxis() {
+  const hist = state.history ? state.history.pts : [];
+  const last = hist.length ? new Date(hist[hist.length-1].bucket).getTime() : -Infinity;
+  const fc = forecastPts().filter(p => new Date(p.ts).getTime() > last);
+  return { hist, fc, H: hist.length };
+}
+
+// Align an actual series (nulls over the future) and a forecast series (nulls
+// over the past, seeded at the seam so the dashed line continues the solid one).
+function mergeSeries(hist, fc, H, hk, fk) {
+  const actual = hist.map(p => p[hk]).concat(fc.map(() => null));
+  const forecast = new Array(H + fc.length).fill(null);
+  if (H > 0 && fc.length) forecast[H-1] = hist[H-1][hk];   // seam
+  fc.forEach((p, i) => { forecast[H+i] = p[fk]; });
+  return { actual, forecast };
+}
+
+function renderLine(id, labels, datasets) {
+  const c = charts[id]; if (!c) return;
+  c.data.labels = labels; c.data.datasets = datasets; c.update("none");
+}
+
+// Rebuild the lower grid (wind / rain / humidity+pressure) with forecast overlays.
+function renderCharts() {
+  const u = state.history.units;
+  const { hist, fc, H } = chartAxis();
+  const labels = hist.map(p => bucketLabel(p.bucket)).concat(fc.map(p => bucketLabel(p.ts)));
+  lastIso = hist.map(p => p.bucket).concat(fc.map(p => p.ts));
+
+  // wind: avg has a forecast, gust does not
+  {
+    const avg = mergeSeries(hist, fc, H, "wind_avg", "wind_avg");
+    const a = ds("Avg", SERIES.wind);  a.data = avg.actual; a.unit = u.speed;
+    const g = ds("Gust", SERIES.gust); g.data = hist.map(p => p.wind_gust).concat(fc.map(() => null)); g.unit = u.speed;
+    const sets = [a, g];
+    if (fc.length) { const fa = fds("Avg", SERIES.wind); fa.data = avg.forecast; fa.unit = u.speed; sets.push(fa); }
+    renderLine("windChart", labels, sets);
+  }
+  // rain: actual + (if available) forecast precip as a muted bar series
+  {
+    const a = { label:"Rain", data: hist.map(p => p.rain).concat(fc.map(() => null)),
+                backgroundColor:SERIES.rain+"cc", borderColor:SERIES.rain, borderWidth:1, unit:u.rain };
+    const sets = [a];
+    const hasPrecip = fc.some(p => p.precip != null);
+    if (fc.length && hasPrecip) {
+      sets.push({ label:"Rain (forecast)", data: new Array(H).fill(null).concat(fc.map(p => p.precip)),
+                  backgroundColor:SERIES.rain+"44", borderColor:SERIES.rain+"99", borderWidth:1, unit:u.rain });
+    }
+    charts.rainChart.options.plugins.legend.display = sets.length > 1;
+    renderLine("rainChart", labels, sets);
+  }
+  // humidity (left axis) + pressure (right axis), each with a forecast overlay
+  {
+    const hum = mergeSeries(hist, fc, H, "humidity", "humidity");
+    const pre = mergeSeries(hist, fc, H, "pressure", "pressure");
+    const dh = ds("Humidity", SERIES.humidity, "y");  dh.data = hum.actual; dh.unit = u.humidity;
+    const dp = ds("Pressure", SERIES.pressure, "y1"); dp.data = pre.actual; dp.unit = u.pressure;
+    const sets = [dh, dp];
+    if (fc.length) {
+      const fh = fds("Humidity", SERIES.humidity, "y");  fh.data = hum.forecast; fh.unit = u.humidity;
+      const fp = fds("Pressure", SERIES.pressure, "y1"); fp.data = pre.forecast; fp.unit = u.pressure;
+      sets.push(fh, fp);
+    }
+    renderLine("hpChart", labels, sets);
+  }
   renderMain();
 }
 
-// Render the toggle-able lead chart from cached history for the active metric.
+// Render the toggle-able lead chart from cached history + forecast.
 function renderMain() {
   const h = state.history; if (!h) return;
   const cfg = MAIN_METRICS[state.mainMetric] || MAIN_METRICS.temp;
   const unit = h.units[cfg.unit];
   const c = charts.mainChart;
-  c.data.labels = h.pts.map(p => bucketLabel(p.bucket));
-  c.data.datasets = cfg.series.map(s => {
-    const d = ds(s.label, s.color);
-    d.fill = cfg.fill && cfg.series.length === 1;
-    d.unit = unit;
-    d.data = h.pts.map(p => p[s.key]);
-    return d;
-  });
+  const { hist, fc, H } = chartAxis();
+  const s = cfg.series[0];
+  const fk = FORECAST_KEYS[state.mainMetric];
+
+  c.data.labels = hist.map(p => bucketLabel(p.bucket)).concat(fc.map(p => bucketLabel(p.ts)));
+  const d = ds(s.label, s.color);
+  d.fill = cfg.fill; d.unit = unit;
+  d.data = hist.map(p => p[s.key]).concat(fc.map(() => null));
+  const sets = [d];
+  if (fk && fc.length) {
+    const m = mergeSeries(hist, fc, H, s.key, fk);
+    const fd = fds(s.label, s.color); fd.unit = unit; fd.data = m.forecast;
+    sets.push(fd);
+  }
+  c.options.plugins.legend.display = sets.length > 1;
+  c.data.datasets = sets;
   $("mainTitle").textContent = `${cfg.label} (${unit})`;
   c.update("none");
 }
-function set(id, labels, series) {
-  const c = charts[id]; if (!c) return;
-  c.data.labels = labels;
-  series.forEach((arr, i) => { c.data.datasets[i].data = arr; });
-  c.update("none");
+
+/* ── forecast tiles ──────────────────────────────────────────────── */
+// Headline condition for a group of hours: most frequent, ties broken toward
+// the more significant condition (so a rainy spell isn't hidden by clear hours).
+function dominantCond(conds) {
+  const n = {};
+  for (const c of conds) if (c) n[c] = (n[c]||0) + 1;
+  let best = "", bn = 0, bsev = -1;
+  for (const [c, cnt] of Object.entries(n)) {
+    const sev = COND_SEVERITY.indexOf(c);
+    if (cnt > bn || (cnt === bn && sev > bsev)) { best = c; bn = cnt; bsev = sev; }
+  }
+  return best;
+}
+function isNight(date) { try { return timeOfDay(date) === "night"; } catch (e) { return false; } }
+
+// Summarize a set of hourly points into one tile (hi/lo, headline condition,
+// precip total, day/night icon choice from the segment midpoint).
+function buildTile(seg, idx, mode) {
+  const temps = seg.map(p => p.temp).filter(v => v != null);
+  const precip = seg.map(p => p.precip).filter(v => v != null).reduce((a,b) => a+b, 0);
+  const mid = new Date((new Date(seg[0].ts).getTime() + new Date(seg[seg.length-1].ts).getTime())/2);
+  return {
+    idx, mode, when: new Date(seg[0].ts),
+    hi: temps.length ? Math.max(...temps) : null,
+    lo: temps.length ? Math.min(...temps) : null,
+    cond: dominantCond(seg.map(p => p.condition)),
+    precip, night: isNight(mid),
+  };
+}
+// 24h view: the next 24h as six 4-hour segments.
+function hourlySegments(pts) {
+  const now = Date.now(), out = [];
+  for (let i = 0; i < 6; i++) {
+    const a = now + i*4*3600e3, b = a + 4*3600e3;
+    const seg = pts.filter(p => { const t = new Date(p.ts).getTime(); return t >= a && t < b; });
+    if (seg.length) out.push(buildTile(seg, i, "hour"));
+  }
+  return out;
+}
+// 7d / 30d view: up to seven daily tiles.
+function dailySegments(pts) {
+  const days = {};
+  for (const p of pts) (days[p.ts.slice(0,10)] ||= []).push(p);
+  return Object.values(days).slice(0, 7).map((seg, i) => buildTile(seg, i, "day"));
+}
+function tileWhen(t) {
+  if (t.mode === "hour") return t.idx === 0 ? "Now" : t.when.toLocaleTimeString([], {hour:"numeric"});
+  return t.idx === 0 ? "Today" : t.when.toLocaleDateString([], {weekday:"short"});
+}
+function forecastTile(t, u) {
+  const c = COND[t.cond] || { day:"⛅", night:"⛅", label:"—" };
+  const ico = t.night ? c.night : c.day;
+  const hi = t.hi == null ? "—" : `${Math.round(t.hi)}°`;
+  const lo = t.lo == null ? "" : `<span class="lo">${Math.round(t.lo)}°</span>`;
+  const sub = t.precip > 0 ? `<div class="ft-sub">💧 ${fmtNum(t.precip, state.units==="imperial"?2:1)} ${u.rain}</div>` : "";
+  return `<div class="ftile card">
+    <div class="ft-when">${tileWhen(t)}</div>
+    <div class="ft-ico" role="img" aria-label="${c.label}">${ico}</div>
+    <div class="ft-temp">${hi} ${lo}</div>
+    <div class="ft-cond">${c.label}</div>${sub}
+  </div>`;
+}
+function renderForecastTiles() {
+  const f = state.forecast, wrap = $("forecastStrip");
+  if (!f || !f.pts.length) { wrap.hidden = true; return; }
+  const tiles = state.range === "24h" ? hourlySegments(f.pts) : dailySegments(f.pts);
+  if (!tiles.length) { wrap.hidden = true; return; }
+  $("forecastTiles").innerHTML = tiles.map(t => forecastTile(t, f.units)).join("");
+  $("forecastSrc").textContent = f.source ? `via ${f.source}` : "";
+  wrap.hidden = false;
 }
 
 /* ── wiring ──────────────────────────────────────────────────────── */
@@ -564,13 +775,14 @@ function setUnits(u) {
   });
   refreshAll();
 }
-function refreshLive() { loadCurrent(); loadSummary(); loadLightning(); if (state.range === "24h") loadHistory(); }
-function refreshAll()  { loadCurrent(); loadSummary(); loadLightning(); loadHistory(); }
+function refreshLive() { loadCurrent(); loadSummary(); loadLightning(); if (state.range === "24h") loadCharts(); }
+function refreshAll()  { loadCurrent(); loadSummary(); loadLightning(); loadCharts(); }
 
 function init() {
   const params = new URLSearchParams(location.search);
   if (params.get("theme")) state.themeOverride = params.get("theme");
   if (params.get("metric") && MAIN_METRICS[params.get("metric")]) state.mainMetric = params.get("metric");
+  if (params.get("range") && RANGES[params.get("range")]) state.range = params.get("range");
   if (params.get("lat")) LOC.lat = parseFloat(params.get("lat"));
   if (params.get("lon")) LOC.lon = parseFloat(params.get("lon"));
   initCharts();
@@ -578,7 +790,7 @@ function init() {
   document.querySelectorAll("#rangeChips .chip").forEach(chip => chip.onclick = () => {
     state.range = chip.dataset.range;
     document.querySelectorAll("#rangeChips .chip").forEach(c => c.classList.toggle("active", c === chip));
-    loadSummary(); loadLightning(); loadHistory();
+    loadSummary(); loadLightning(); loadCharts();
   });
   document.querySelectorAll("#metricTabs .mtab").forEach(t => {
     const pick = () => {
@@ -590,6 +802,7 @@ function init() {
     t.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
   });
   document.querySelectorAll("#metricTabs .mtab").forEach(x => x.classList.toggle("active", x.dataset.m === state.mainMetric));
+  document.querySelectorAll("#rangeChips .chip").forEach(c => c.classList.toggle("active", c.dataset.range === state.range));
   setUnits(state.units);             // sets toggle + triggers first full load
   applyTheme();
   setInterval(refreshLive, 60e3);    // live tiles refresh each minute

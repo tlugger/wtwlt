@@ -11,12 +11,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/samber/lo"
 
+	"github.com/tlugger/wtwlt/server/internal/forecast"
 	"github.com/tlugger/wtwlt/server/internal/store"
 	"github.com/tlugger/wtwlt/server/internal/units"
 )
@@ -39,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /api/current", s.current)
 	mux.HandleFunc("GET /api/history", s.history)
+	mux.HandleFunc("GET /api/forecast", s.forecast)
 	mux.HandleFunc("GET /api/summary", s.summary)
 	mux.HandleFunc("GET /api/lightning", s.lightning)
 	mux.HandleFunc("GET /api/stations", s.stations)
@@ -70,7 +73,7 @@ type currentDTO struct {
 	Temp       *float64     `json:"temp"`
 	Humidity   *float64     `json:"humidity"`
 	Pressure   *float64     `json:"pressure"`
-	UV         *float64     `json:"uv"`
+	Dewpoint   *float64     `json:"dewpoint"`
 	Wind       windDTO      `json:"wind"`
 	Rain       float64      `json:"rain"`
 	Soil       *float64     `json:"soil"`
@@ -101,6 +104,27 @@ type historyResp struct {
 	UnitSystem string         `json:"unit_system"`
 	Units      units.Labels   `json:"units"`
 	Points     []historyPoint `json:"points"`
+}
+
+type forecastPoint struct {
+	TS        string   `json:"ts"`
+	Temp      *float64 `json:"temp"`
+	Humidity  *float64 `json:"humidity"`
+	Pressure  *float64 `json:"pressure"`
+	Precip    *float64 `json:"precip"`
+	WindAvg   *float64 `json:"wind_avg"`
+	WindDir   *float64 `json:"wind_dir"`
+	Condition string   `json:"condition"`
+}
+
+type forecastResp struct {
+	Station    string          `json:"station"`
+	Source     string          `json:"source"`
+	From       string          `json:"from"`
+	To         string          `json:"to"`
+	UnitSystem string          `json:"unit_system"`
+	Units      units.Labels    `json:"units"`
+	Points     []forecastPoint `json:"points"`
 }
 
 type rangeStat struct {
@@ -164,7 +188,7 @@ func (s *Server) current(w http.ResponseWriter, r *http.Request) {
 		Temp:      sys.Temp(reading.TempC),
 		Humidity:  sys.Pct(reading.HumidityPct),
 		Pressure:  sys.Pressure(reading.PressureHpa),
-		UV:        sys.UV(reading.UVIndex),
+		Dewpoint:  sys.Temp(dewPointC(reading.TempC, reading.HumidityPct)),
 		Wind: windDTO{
 			Avg:         sys.SpeedV(reading.Wind.AvgMPS),
 			Gust:        sys.SpeedV(reading.Wind.GustMPS),
@@ -178,6 +202,20 @@ func (s *Server) current(w http.ResponseWriter, r *http.Request) {
 		UnitSystem: sys.Name(),
 		Units:      sys.Labels(),
 	})
+}
+
+// dewPointC returns the dew point in °C from temperature (°C) and relative
+// humidity (%) via the Magnus-Tetens approximation. nil if either input is
+// missing or RH is non-positive (where the formula is undefined).
+func dewPointC(tempC, rh *float64) *float64 {
+	if tempC == nil || rh == nil || *rh <= 0 {
+		return nil
+	}
+	const a, b = 17.62, 243.12
+	t := *tempC
+	g := math.Log(*rh/100.0) + a*t/(b+t)
+	td := b * g / (a - g)
+	return &td
 }
 
 // GET /api/history?station=&from=&to=&bucket=raw|hour|day&units=
@@ -217,6 +255,40 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 				Soil:     sys.Pct(b.SoilPct),
 			}
 		}),
+	}
+	writeJSON(w, resp)
+}
+
+// GET /api/forecast?station=&units=&source= — stored forecast for the coming
+// week (the chart overlay clamps to 48h client-side; the tiles use the rest).
+func (s *Server) forecast(w http.ResponseWriter, r *http.Request) {
+	sys := units.Parse(r.URL.Query().Get("units"))
+	now := time.Now().UTC()
+	from, to := now, now.Add(7*24*time.Hour)
+	pts, source, err := s.store.Forecast(r.URL.Query().Get("source"), from, to)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	resp := forecastResp{
+		Station: station(r), Source: source,
+		From: from.Format(time.RFC3339), To: to.Format(time.RFC3339),
+		UnitSystem: sys.Name(), Units: sys.Labels(),
+		Points: lo.Map(pts, func(p forecast.Point, _ int) forecastPoint {
+			return forecastPoint{
+				TS:        p.TS.Format(time.RFC3339),
+				Temp:      sys.Temp(p.TempC),
+				Humidity:  sys.Pct(p.HumidityPct),
+				Pressure:  sys.Pressure(p.PressureHpa),
+				Precip:    sys.Rain(p.PrecipMm),
+				WindAvg:   sys.Speed(p.WindMps),
+				WindDir:   p.WindDirDeg,
+				Condition: p.Condition,
+			}
+		}),
+	}
+	if resp.Points == nil {
+		resp.Points = []forecastPoint{}
 	}
 	writeJSON(w, resp)
 }

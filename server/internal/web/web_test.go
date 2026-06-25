@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tlugger/wtwlt/server/internal/forecast"
 	"github.com/tlugger/wtwlt/server/internal/model"
 	"github.com/tlugger/wtwlt/server/internal/store"
 )
@@ -123,6 +124,24 @@ func TestCurrentMetric(t *testing.T) {
 	if dto.BatteryV == nil || *dto.BatteryV != 3.92 {
 		t.Errorf("battery = %v", dto.BatteryV) // volts: never converted
 	}
+	if dto.Dewpoint == nil || *dto.Dewpoint != 12.8 { // 21.4°C @ 58.2% RH
+		t.Errorf("dewpoint = %v, want 12.8", dto.Dewpoint)
+	}
+}
+
+func TestDewPointC(t *testing.T) {
+	dp := dewPointC(fp(21.4), fp(58.2))
+	if dp == nil || *dp < 12.8 || *dp > 12.9 {
+		t.Errorf("dewPointC = %v, want ~12.84", dp)
+	}
+	// Saturated air: dew point ≈ temperature.
+	if dp := dewPointC(fp(20), fp(100)); dp == nil || *dp < 19.9 || *dp > 20.1 {
+		t.Errorf("dewPointC at 100%% = %v, want ~20", dp)
+	}
+	// Missing inputs / RH<=0 -> nil (undefined).
+	if dewPointC(nil, fp(50)) != nil || dewPointC(fp(20), nil) != nil || dewPointC(fp(20), fp(0)) != nil {
+		t.Error("dewPointC should be nil when inputs are missing or RH<=0")
+	}
 }
 
 func TestCurrentImperial(t *testing.T) {
@@ -149,6 +168,9 @@ func TestCurrentImperial(t *testing.T) {
 	if dto.Humidity == nil || *dto.Humidity != 58.2 {
 		t.Errorf("humidity should pass through unchanged, got %v", dto.Humidity)
 	}
+	if dto.Dewpoint == nil || *dto.Dewpoint != 55.1 { // 12.84°C -> °F
+		t.Errorf("dewpoint °F = %v, want 55.1", dto.Dewpoint)
+	}
 }
 
 func TestCurrentNotFound(t *testing.T) {
@@ -161,7 +183,7 @@ func TestCurrentNotFound(t *testing.T) {
 func seedHistory(t *testing.T, st *store.Store) {
 	t.Helper()
 	rows := []struct {
-		ts          string
+		ts               string
 		temp, gust, rain float64
 	}{
 		{"2026-06-16T12:00:00Z", 20, 5, 0.2},
@@ -223,7 +245,7 @@ func TestHistoryInvalidTime(t *testing.T) {
 func TestSummary(t *testing.T) {
 	st, h := newServer(t)
 	for _, row := range []struct {
-		ts         string
+		ts               string
 		temp, gust, rain float64
 	}{
 		{"2026-06-16T12:00:00Z", 18, 5, 0.2},
@@ -296,5 +318,68 @@ func TestStations(t *testing.T) {
 	decode(t, rr, &stations)
 	if len(stations) != 1 || !stations[0].Online {
 		t.Errorf("stations = %+v", stations)
+	}
+}
+
+func TestForecastEndpoint(t *testing.T) {
+	st, h := newServer(t)
+	now := time.Now().UTC().Truncate(time.Hour)
+	// One in-window future hour, one past hour (should be filtered out).
+	pts := []forecast.Point{
+		{TS: now.Add(time.Hour), TempC: fp(20), HumidityPct: fp(50), PressureHpa: fp(840), PrecipMm: fp(0), WindMps: fp(5), WindDirDeg: fp(270), Condition: forecast.CondRain},
+		{TS: now.Add(-2 * time.Hour), TempC: fp(10)},
+	}
+	if err := st.UpsertForecast("openmeteo", pts, now); err != nil {
+		t.Fatalf("seed forecast: %v", err)
+	}
+
+	// Metric: temp passes through; source reported.
+	rr := do(t, h, "/api/forecast?units=metric")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d", rr.Code)
+	}
+	var resp forecastResp
+	decode(t, rr, &resp)
+	if resp.Source != "openmeteo" {
+		t.Errorf("source = %q", resp.Source)
+	}
+	if len(resp.Points) != 1 {
+		t.Fatalf("got %d points, want 1 (past filtered)", len(resp.Points))
+	}
+	if resp.Points[0].Temp == nil || *resp.Points[0].Temp != 20 {
+		t.Errorf("metric temp = %v, want 20", resp.Points[0].Temp)
+	}
+	if resp.Points[0].Condition != forecast.CondRain {
+		t.Errorf("condition = %q, want rain", resp.Points[0].Condition)
+	}
+	if resp.Units.Temp != "°C" {
+		t.Errorf("units.temp = %q", resp.Units.Temp)
+	}
+
+	// Imperial: temp converted to °F, wind to mph.
+	rr = do(t, h, "/api/forecast?units=imperial")
+	var imp forecastResp
+	decode(t, rr, &imp)
+	if imp.Points[0].Temp == nil || *imp.Points[0].Temp != 68 { // 20°C
+		t.Errorf("imperial temp = %v, want 68", imp.Points[0].Temp)
+	}
+	if imp.Units.Speed != "mph" {
+		t.Errorf("units.speed = %q", imp.Units.Speed)
+	}
+}
+
+func TestForecastEmpty(t *testing.T) {
+	_, h := newServer(t)
+	rr := do(t, h, "/api/forecast")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d", rr.Code)
+	}
+	var resp forecastResp
+	decode(t, rr, &resp)
+	if resp.Points == nil {
+		t.Error("points should be [] not null")
+	}
+	if len(resp.Points) != 0 {
+		t.Errorf("want 0 points, got %d", len(resp.Points))
 	}
 }
