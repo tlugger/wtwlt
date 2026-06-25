@@ -38,7 +38,9 @@ hourly/daily rollups), and serves the dashboard + API that read it.
 An **ESP32** (MicroMod form factor) on a **SparkFun MicroMod Weather Carrier**:
 
 - **BME280** (I²C) — temperature, humidity, barometric pressure
-- **VEML6075** (I²C) — UV index
+- **VEML6075** (I²C) — UV index. *Optional:* current carriers ship with this
+  footprint unpopulated (the part is EOL), so it's disabled by default
+  (`ENABLE_UV 0`); `uv_index` then publishes as `null`.
 - **AS3935** (SPI) — lightning detection (strike distance + energy)
 - **SparkFun Weather Meter Kit** — anemometer, wind vane, tipping-bucket rain
   gauge (driven by the `SFEWeatherMeterKit` library)
