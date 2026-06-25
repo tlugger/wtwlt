@@ -53,7 +53,7 @@ static const uint8_t VEML6075_ADDR = 0x10;
 // Feature toggles (disable a sensor that isn't populated / wired)
 // ---------------------------------------------------------------------------
 #define ENABLE_BME       1
-#define ENABLE_UV        1
+#define ENABLE_UV        0   // this board has an empty VEML6075 footprint (Vishay EOL'd the part)
 #define ENABLE_LIGHTNING 1
 #define ENABLE_SOIL      1
 // Log all responding I2C addresses at boot (bench bring-up diagnostic).
