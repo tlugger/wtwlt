@@ -76,6 +76,16 @@ static const int SOIL_RAW_DRY = 3200;  // reading in dry air
 static const int SOIL_RAW_WET = 1300;  // reading fully submerged
 
 // ---------------------------------------------------------------------------
+// BME280 calibration offsets, each subtracted from the raw reading and applied
+// independently. The sensor self-heats from the nearby ESP32 (continuously
+// awake) and reads high — set TEMP_OFFSET_C to (station_reading - reference).
+// HUMIDITY_OFFSET_PCT is a separate additive trim against a reference hygrometer
+// (the raw RH is reported as-is when it's 0; temp and humidity are decoupled).
+// ---------------------------------------------------------------------------
+static const float TEMP_OFFSET_C      = 5.9f;  // bench: 27.9°C raw vs 22°C reference
+static const float HUMIDITY_OFFSET_PCT = 0.0f; // calibrate against a reference hygrometer
+
+// ---------------------------------------------------------------------------
 // Battery monitoring (optional). Set BATTERY_ADC_PIN to a valid pin to enable;
 // leave as 0xFF to report battery_v as null.
 // ---------------------------------------------------------------------------
