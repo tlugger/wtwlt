@@ -97,12 +97,15 @@ static const uint16_t VANE_ADC_VALUES[16] = {
   2139,  // 337.5° (provisional)
 };
 
-// MOUNT-DAY TODO: after physically mounting the vane, point it at a known
-// heading (phone compass), read the reported direction, and set this offset so
-// reported = true. If direction increases the "wrong way" vs compass, the vane
-// was swept the opposite way — re-calibrate VANE_ADC_VALUES in the other order.
-// Added to the raw vane reading (mod 360).
-static const float WIND_DIR_OFFSET_DEG = 0.0f;
+// Mount-day alignment: added to the raw vane reading (mod 360). Set on
+// 2026-06-30 from station-vs-forecast comparison — over ~6 min of steady wind
+// the station's mean bearing was ~88° while Open-Meteo reported ~137° from the
+// same location, so the vane reads ~49° low. PROVISIONAL: the reference is a
+// single model bearing against variable wind (per-sample spread ~30–64°), so
+// treat this as ±~15°. Rotation sense is still unconfirmed — if reported
+// direction tracks a real wind shift the "wrong way" vs Open-Meteo, the sweep
+// was backwards: reverse the VANE_ADC_VALUES order, then re-set this offset.
+static const float WIND_DIR_OFFSET_DEG = 49.0f;
 
 // ---------------------------------------------------------------------------
 // Soil moisture raw(ADC)->% calibration. Bench-calibrated on this board (powered
