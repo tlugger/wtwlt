@@ -100,6 +100,10 @@
   .now { padding:24px; display:flex; flex-direction:column; justify-content:center; gap:6px; min-width:0; }
   .now .glyph { font-size:52px; line-height:1; }
   .now .big { font-size:64px; font-weight:700; line-height:1; }
+  .now .offset { font-size:11px; font-weight:500; font-style:italic; padding:3px 8px;
+    border-radius:10px; opacity:0.8; width:fit-content; }
+  .now .offset.warm { background:rgba(217,164,65,0.15); color:var(--accent-2); }
+  .now .offset.cool { background:rgba(156,175,136,0.15); color:var(--accent); }
   .now .cond { color:var(--ink-dim); font-size:15px; }
   .now .updated { color:var(--ink-dim); font-size:12px; margin-top:6px; }
   .tiles { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
@@ -210,6 +214,7 @@
     <div class="now card" id="now">
       <div class="glyph" id="nowGlyph">⛅</div>
       <div class="big" id="nowTemp">—</div>
+      <div class="offset" id="nowOffset" hidden></div>
       <div class="cond" id="nowCond">awaiting the skies…</div>
       <div class="updated" id="nowUpdated"></div>
       <div class="updated" id="nowLoc"></div>
@@ -395,6 +400,7 @@ async function loadCurrent() {
   $("nowUpdated").textContent = `${u.temp} · ${state.units}`;
 
   renderTiles();
+  renderOffset();
   applyTheme();
 }
 // Tiles use the latest reading + the current cloud cover from the forecast,
@@ -421,6 +427,29 @@ function currentCloud() {
     if (d < bd) { bd = d; best = p; }
   }
   return best ? best.cloud_pct : null;
+}
+// Forecast temperature nearest to now; used for the offset badge.
+function currentForecastTemp() {
+  const f = state.forecast; if (!f || !f.pts.length) return null;
+  const now = Date.now();
+  let best = null, bd = Infinity;
+  for (const p of f.pts) {
+    const d = Math.abs(new Date(p.ts).getTime() - now);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best ? best.temp : null;
+}
+function renderOffset() {
+  const c = state.current; if (!c) return;
+  const el = $("nowOffset");
+  const ft = currentForecastTemp();
+  if (c.temp == null || ft == null) { el.hidden = true; return; }
+  const diff = c.temp - ft;
+  if (Math.abs(diff) < 0.05) { el.hidden = true; return; }
+  const sign = diff > 0 ? "+" : "";
+  el.textContent = `${sign}${fmtNum(diff)}° vs forecast`;
+  el.className = "offset " + (diff > 0 ? "warm" : "cool");
+  el.hidden = false;
 }
 function cloudTile() {
   const v = currentCloud();
@@ -614,6 +643,7 @@ async function loadCharts() {
   renderForecastTiles();
   renderLoc();
   renderTiles();   // fill the cloud-cover tile now the forecast is loaded
+  renderOffset();  // update the temperature offset badge
   if (state.history) renderCharts();
 }
 async function fetchHistory() {
