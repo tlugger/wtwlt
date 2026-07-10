@@ -369,3 +369,45 @@ func TestForecastUpsertAndRead(t *testing.T) {
 		t.Errorf("pruned %d, want 1", n)
 	}
 }
+
+func TestHistoryInterval15m(t *testing.T) {
+	s := newTestStore(t)
+	base := time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC)
+	// Two readings in the 10:00 15-min bin, one in the 10:15 bin.
+	seedReading(t, s, "wtwlt-01", base, 20.0, 5.0, 0.2)                     // 10:00
+	seedReading(t, s, "wtwlt-01", base.Add(10*time.Minute), 22.0, 9.0, 0.3) // 10:10
+	seedReading(t, s, "wtwlt-01", base.Add(20*time.Minute), 24.0, 4.0, 0.1) // 10:20
+
+	got, err := s.History("wtwlt-01", base.Add(-time.Hour), base.Add(time.Hour), "15m")
+	if err != nil {
+		t.Fatalf("History 15m: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 fifteen-min bins, got %d", len(got))
+	}
+	// First bin (10:00–10:15): avg temp 21, max gust 9, rain sum 0.5, count 2.
+	b0 := got[0]
+	if !b0.Bucket.Equal(base) {
+		t.Errorf("bin0 start = %v, want %v", b0.Bucket, base)
+	}
+	if b0.Count != 2 || b0.TempC == nil || *b0.TempC != 21.0 {
+		t.Errorf("bin0 = count %d temp %v", b0.Count, b0.TempC)
+	}
+	if b0.WindGustMPS == nil || *b0.WindGustMPS != 9.0 {
+		t.Errorf("bin0 max gust = %v, want 9", b0.WindGustMPS)
+	}
+	if diff := b0.RainMM - 0.5; diff < -1e-9 || diff > 1e-9 {
+		t.Errorf("bin0 rain sum = %v, want 0.5", b0.RainMM)
+	}
+	// Second bin (10:15–10:30): the 10:20 reading.
+	if got[1].Count != 1 || !got[1].Bucket.Equal(base.Add(15*time.Minute)) {
+		t.Errorf("bin1 = count %d start %v", got[1].Count, got[1].Bucket)
+	}
+}
+
+func TestHistoryInvalidBucketStillErrors(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.History("wtwlt-01", time.Time{}, time.Now(), "5s"); err == nil {
+		t.Fatal("expected error for unknown bucket")
+	}
+}
