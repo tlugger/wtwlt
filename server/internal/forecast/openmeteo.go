@@ -26,7 +26,7 @@ func (o *openMeteo) Fetch(ctx context.Context, lat, lon float64) ([]Point, error
 	// client-side. timezone=UTC so the naive timestamps are UTC;
 	// wind_speed_unit=ms keeps it SI like everything else.
 	url := fmt.Sprintf("%s?latitude=%.4f&longitude=%.4f"+
-		"&hourly=temperature_2m,relative_humidity_2m,surface_pressure,precipitation,precipitation_probability,cloud_cover,weather_code,wind_speed_10m,wind_direction_10m"+
+		"&hourly=temperature_2m,relative_humidity_2m,surface_pressure,precipitation,precipitation_probability,cloud_cover,uv_index,weather_code,wind_speed_10m,wind_direction_10m"+
 		"&wind_speed_unit=ms&timezone=UTC&forecast_days=7", o.base, lat, lon)
 	body, err := getBody(ctx, o.hc, url, defaultUA, "application/json")
 	if err != nil {
@@ -46,6 +46,7 @@ type omResp struct {
 		Precip      []*float64 `json:"precipitation"`
 		PrecipProb  []*float64 `json:"precipitation_probability"`
 		Cloud       []*float64 `json:"cloud_cover"`
+		UV          []*float64 `json:"uv_index"`
 		WeatherCode []*int     `json:"weather_code"`
 		WindSpeed   []*float64 `json:"wind_speed_10m"`
 		WindDir     []*float64 `json:"wind_direction_10m"`
@@ -112,6 +113,7 @@ func parseOpenMeteo(body []byte) ([]Point, error) {
 			PrecipMm:    at(h.Precip, i),
 			PrecipProb:  at(h.PrecipProb, i),
 			CloudPct:    at(h.Cloud, i),
+			UVIndex:     at(h.UV, i),
 			WindMps:     at(h.WindSpeed, i),
 			WindDirDeg:  at(h.WindDir, i),
 			Condition:   cond,

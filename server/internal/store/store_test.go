@@ -308,7 +308,7 @@ func TestForecastUpsertAndRead(t *testing.T) {
 	fetched := base.Add(-time.Minute)
 
 	pts := []forecast.Point{
-		{TS: base, TempC: f(18), HumidityPct: f(55), PressureHpa: f(840), PrecipMm: f(0), PrecipProb: f(20), CloudPct: f(40), WindMps: f(3), WindDirDeg: f(270), Condition: forecast.CondClear},
+		{TS: base, TempC: f(18), HumidityPct: f(55), PressureHpa: f(840), PrecipMm: f(0), PrecipProb: f(20), CloudPct: f(40), UVIndex: f(5), WindMps: f(3), WindDirDeg: f(270), Condition: forecast.CondClear},
 		{TS: base.Add(time.Hour), TempC: f(20), WindMps: f(4)}, // pressure/precip/prob/cloud absent -> nil
 	}
 	if err := s.UpsertForecast("openmeteo", pts, fetched); err != nil {
@@ -337,6 +337,9 @@ func TestForecastUpsertAndRead(t *testing.T) {
 	}
 	if got[0].CloudPct == nil || *got[0].CloudPct != 40 {
 		t.Errorf("cloud_pct = %v, want 40", got[0].CloudPct)
+	}
+	if got[0].UVIndex == nil || *got[0].UVIndex != 5 {
+		t.Errorf("uv_index = %v, want 5", got[0].UVIndex)
 	}
 	if got[1].PressureHpa != nil || got[1].PrecipProb != nil || got[1].CloudPct != nil {
 		t.Errorf("absent fields should be nil, got pres=%v prob=%v cloud=%v", got[1].PressureHpa, got[1].PrecipProb, got[1].CloudPct)

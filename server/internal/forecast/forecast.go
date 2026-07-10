@@ -28,6 +28,7 @@ type Point struct {
 	PrecipMm    *float64
 	PrecipProb  *float64 // probability of precipitation, %
 	CloudPct    *float64 // total cloud cover, %
+	UVIndex     *float64 // UV index (forecast; the station has no UV sensor)
 	WindMps     *float64
 	WindDirDeg  *float64
 	Condition   string // normalized sky/precip condition (see Condition* below)

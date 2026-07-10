@@ -130,6 +130,7 @@ type forecastPoint struct {
 	Precip     *float64 `json:"precip"`
 	PrecipProb *float64 `json:"precip_prob"`
 	Cloud      *float64 `json:"cloud_pct"`
+	UV         *float64 `json:"uv"`
 	WindAvg    *float64 `json:"wind_avg"`
 	WindDir    *float64 `json:"wind_dir"`
 	Condition  string   `json:"condition"`
@@ -288,6 +289,7 @@ func (s *Server) forecast(w http.ResponseWriter, r *http.Request) {
 				Precip:     sys.Rain(p.PrecipMm),
 				PrecipProb: sys.Pct(p.PrecipProb),
 				Cloud:      sys.Pct(p.CloudPct),
+				UV:         sys.UV(p.UVIndex),
 				WindAvg:    sys.Speed(p.WindMps),
 				WindDir:    p.WindDirDeg,
 				Condition:  p.Condition,

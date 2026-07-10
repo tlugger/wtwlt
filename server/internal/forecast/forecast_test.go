@@ -26,6 +26,7 @@ func TestParseOpenMeteo(t *testing.T) {
 	    "precipitation": [0.0, 1.2],
 	    "precipitation_probability": [5, 80],
 	    "cloud_cover": [10, 95],
+	    "uv_index": [0.4, 6.2],
 	    "weather_code": [0, 61],
 	    "wind_speed_10m": [3.4, null],
 	    "wind_direction_10m": [270, 280]
@@ -52,6 +53,8 @@ func TestParseOpenMeteo(t *testing.T) {
 	approx(t, pts[1].PrecipProb, 80)
 	approx(t, pts[0].CloudPct, 10)
 	approx(t, pts[1].CloudPct, 95)
+	approx(t, pts[0].UVIndex, 0.4)
+	approx(t, pts[1].UVIndex, 6.2)
 	if pts[0].Condition != CondClear { // code 0
 		t.Errorf("condition[0] = %q, want clear", pts[0].Condition)
 	}
