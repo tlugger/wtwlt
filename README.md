@@ -74,11 +74,18 @@ Pins, cadence, and calibration constants live in
 ## Dashboard
 
 An earth-toned dashboard whose palette shifts with the time of day and live
-conditions (clear / dusk / night / rain / storm). Each chart continues past
-"now" with a dashed, muted **forecast overlay** (temperature, humidity,
-pressure, wind, precipitation) so the projection reads as one line with the
-measured history, plus a row of **forecast condition tiles** (icon, high/low,
-condition) — 4-hour segments on the 24h view, daily on the longer ranges:
+conditions (clear / dusk / night / rain / storm). A compact conditions bar leads
+into a summary band of current-condition tiles (each with a 6-hour sparkline),
+and a combined rain/cloud tile that shows the day's rain total when it has
+rained, else cloud cover. A **time-range dropdown** (12h · 24h · 48h · 7d · 30d,
+default 12h) rebins every chart to a range-appropriate interval, which also
+smooths the wind trace. Each chart continues past "now" with a dashed, muted
+**forecast overlay** (temperature, humidity, pressure, wind, precipitation) so
+the projection reads as one line with the measured history, and every chart has
+a **Chart / Table toggle** — the table lists the same binned rows with forecast
+rows in italics. A row of **forecast condition tiles** (icon, high/low,
+condition) rounds it out — 4-hour segments on the short ranges, daily on the
+longer ones:
 
 ![wtwlt dashboard shown in day, dusk, and night themes](docs/dashboard-themes.png)
 

@@ -260,10 +260,20 @@ type HistoryBucket struct {
 	SoilPct     *float64
 }
 
-// History returns aggregated readings for [from,to). `raw` aggregates live raw
-// readings (one point per reading); `hour`/`day` read the precomputed rollup
-// tables (fast for long ranges, and they survive raw pruning).
+// intervalBuckets maps a fixed-interval bucket name to its width in seconds.
+// These aggregate raw readings on the fly (avg for levels, max for gust, sum
+// for rain) — used to smooth charts and drive the range-appropriate tables.
+var intervalBuckets = map[string]int{
+	"15m": 900, "30m": 1800, "1h": 3600, "3h": 10800, "6h": 21600,
+}
+
+// History returns aggregated readings for [from,to). `raw` is one point per
+// reading; `15m`/`30m`/`1h`/`3h`/`6h` bin raw readings into fixed intervals;
+// `hour`/`day` read the precomputed rollup tables (survive raw pruning).
 func (s *Store) History(stationID string, from, to time.Time, bucket string) ([]HistoryBucket, error) {
+	if sec, ok := intervalBuckets[bucket]; ok {
+		return s.historyInterval(stationID, from, to, sec)
+	}
 	switch bucket {
 	case "", "raw":
 		return s.historyRaw(stationID, from, to)
@@ -273,8 +283,24 @@ func (s *Store) History(stationID string, from, to time.Time, bucket string) ([]
 	case "day":
 		return s.historyRollup("readings_daily", stationID, from.Truncate(24*time.Hour), to)
 	default:
-		return nil, fmt.Errorf("invalid bucket %q (want raw|hour|day)", bucket)
+		return nil, fmt.Errorf("invalid bucket %q (want raw|15m|30m|1h|3h|6h|hour|day)", bucket)
 	}
+}
+
+// historyInterval bins raw readings into fixed `sec`-second buckets, labelling
+// each bucket by its RFC3339 start. Same aggregation as historyRaw.
+func (s *Store) historyInterval(stationID string, from, to time.Time, sec int) ([]HistoryBucket, error) {
+	q := fmt.Sprintf(`
+		SELECT strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ', (CAST(strftime('%%s', ts) AS INTEGER)/%d)*%d, 'unixepoch') AS bucket,
+		       COUNT(*), AVG(temp_c), AVG(humidity_pct), AVG(pressure_hpa), AVG(uv_index),
+		       AVG(wind_avg_mps), MAX(wind_gust_mps), SUM(rain_mm), AVG(soil_moisture_pct)
+		FROM readings WHERE station_id=? AND ts>=? AND ts<?
+		GROUP BY bucket ORDER BY bucket`, sec, sec)
+	rows, err := s.db.Query(q, stationID, isoUTC(from), isoUTC(to))
+	if err != nil {
+		return nil, err
+	}
+	return scanHistory(rows)
 }
 
 func (s *Store) historyRaw(stationID string, from, to time.Time) ([]HistoryBucket, error) {
