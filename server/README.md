@@ -46,7 +46,8 @@ pressure, precip amount, or cloud cover — those publish as `null`). Set
 `WTWLT_FORECAST_PROVIDER=none`, or leave `WTWLT_LAT`/`WTWLT_LON` unset, to
 disable. A normalized condition (clear/cloudy/rain/…) is derived per hour and
 drives the dashboard's forecast tiles (4-hour segments on the 24h view, daily
-otherwise). The lead chart can also project rain-chance and cloud-cover. The
+otherwise). The lead chart can also project rain-chance, cloud-cover, and UV
+index (all forecast-only). The
 coordinates are reverse-geocoded (keyless OpenStreetMap Nominatim) to a coarse
 city/state label shown on the dashboard — the exact lat/lon are never exposed
 to the client.

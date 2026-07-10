@@ -160,9 +160,11 @@
 
   /* expanded forecast table */
   .forecast-expanded { background:var(--card-bg); border:1px solid var(--card-border); border-radius:14px; overflow:hidden; }
+  .fc-scroll { max-height:320px; overflow:auto; }   /* scroll rows (vertical) + columns (mobile) within a fixed height */
   .fc-table { width:100%; border-collapse:collapse; font-size:13px; }
   .fc-table th { font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--ink-dim);
-    font-weight:600; text-align:right; padding:9px 14px; }
+    font-weight:600; text-align:right; padding:9px 14px; position:sticky; top:0; z-index:1;
+    background:var(--bg-bottom); }
   .fc-table th:first-child, .fc-table td:first-child { text-align:left; }
   .fc-table td { padding:10px 14px; text-align:right; white-space:nowrap; border-top:1px solid var(--card-border); }
   .fc-table tbody tr { transition:background .12s; }
@@ -295,8 +297,7 @@
         <div class="panel-ctrls">
           <div class="metric-tabs" id="metricTabs" role="group" aria-label="Chart metric">
             <span class="mtab active" data-m="temp" role="button" tabindex="0">Temp</span>
-            <span class="mtab" data-m="humidity" role="button" tabindex="0">Humidity</span>
-            <span class="mtab" data-m="pressure" role="button" tabindex="0">Pressure</span>
+            <span class="mtab" data-m="uv" role="button" tabindex="0">UV</span>
             <span class="mtab" data-m="precip" role="button" tabindex="0">Rain %</span>
             <span class="mtab" data-m="cloud" role="button" tabindex="0">Cloud %</span>
           </div>
@@ -309,11 +310,11 @@
       <div class="tablewrap" id="mainChart-table" hidden></div>
     </div>
     <div class="panel">
-      <div class="panel-head"><h2>Wind — avg &amp; gust</h2>
-        <div class="viewtoggle" data-chart="windChart" role="group" aria-label="View"><button data-v="chart" class="active">Chart</button><button data-v="table">Table</button></div>
+      <div class="panel-head"><h2>Humidity &amp; Pressure</h2>
+        <div class="viewtoggle" data-chart="hpChart" role="group" aria-label="View"><button data-v="chart" class="active">Chart</button><button data-v="table">Table</button></div>
       </div>
-      <div class="chart-wrap"><canvas id="windChart" role="img" aria-label="Wind speed average and gust over time"></canvas></div>
-      <div class="tablewrap" id="windChart-table" hidden></div>
+      <div class="chart-wrap"><canvas id="hpChart" role="img" aria-label="Humidity and pressure over time"></canvas></div>
+      <div class="tablewrap" id="hpChart-table" hidden></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Rain</h2>
@@ -323,11 +324,11 @@
       <div class="tablewrap" id="rainChart-table" hidden></div>
     </div>
     <div class="panel wide">
-      <div class="panel-head"><h2>Humidity &amp; Pressure</h2>
-        <div class="viewtoggle" data-chart="hpChart" role="group" aria-label="View"><button data-v="chart" class="active">Chart</button><button data-v="table">Table</button></div>
+      <div class="panel-head"><h2>Wind — avg &amp; gust</h2>
+        <div class="viewtoggle" data-chart="windChart" role="group" aria-label="View"><button data-v="chart" class="active">Chart</button><button data-v="table">Table</button></div>
       </div>
-      <div class="chart-wrap"><canvas id="hpChart" role="img" aria-label="Humidity and pressure over time"></canvas></div>
-      <div class="tablewrap" id="hpChart-table" hidden></div>
+      <div class="chart-wrap"><canvas id="windChart" role="img" aria-label="Wind speed average and gust over time"></canvas></div>
+      <div class="tablewrap" id="windChart-table" hidden></div>
     </div>
   </section>
 
@@ -365,15 +366,14 @@ const state = {
 
 // the toggle-able lead chart: each metric maps to history fields + colours
 const MAIN_METRICS = {
-  temp:     { label:"Temperature", unit:"temp",     fill:true,  series:[{key:"temp",          label:"Temp",        color:"#C97B5A"}] },
-  humidity: { label:"Humidity",    unit:"humidity", fill:true,  series:[{key:"humidity",      label:"Humidity",    color:"#6B8E9E"}] },
-  pressure: { label:"Pressure",    unit:"pressure", fill:false, series:[{key:"pressure",      label:"Pressure",    color:"#9C8AA8"}] },
-  precip:   { label:"Rain chance", unitText:"%",    fill:false, series:[{key:"precip_chance", label:"Rain chance", color:"#7FA6A6"}] },
-  cloud:    { label:"Cloud cover", unitText:"%",    fill:true,  forecastOnly:true, series:[{key:"cloud_pct", label:"Cloud cover", color:"#9AA7B0"}] },
+  temp:   { label:"Temperature", unit:"temp",  fill:true,  series:[{key:"temp",          label:"Temp",        color:"#C97B5A"}] },
+  uv:     { label:"UV index",    unitText:"",  fill:true,  forecastOnly:true, series:[{key:"uv",        label:"UV index",    color:"#D9A441"}] },
+  precip: { label:"Rain chance", unitText:"%", fill:false, series:[{key:"precip_chance", label:"Rain chance", color:"#7FA6A6"}] },
+  cloud:  { label:"Cloud cover", unitText:"%", fill:true,  forecastOnly:true, series:[{key:"cloud_pct",  label:"Cloud cover", color:"#9AA7B0"}] },
 };
 
-// which forecast field backs each lead metric (precip/cloud are forward-looking).
-const FORECAST_KEYS = { temp:"temp", humidity:"humidity", pressure:"pressure", precip:"precip_prob", cloud:"cloud_pct" };
+// which forecast field backs each lead metric (uv/cloud are forecast-only).
+const FORECAST_KEYS = { temp:"temp", uv:"uv", precip:"precip_prob", cloud:"cloud_pct" };
 
 // normalized condition -> icon (day/night variants) + label. Order of
 // COND_SEVERITY is least→most significant, used to pick a tile's headline.
@@ -678,10 +678,10 @@ Chart.Interaction.modes.xband = function(chart, e, options, useFinalPosition) {
 };
 
 function fmtAxis(ms) {
-  const d = new Date(ms);
-  if (state.range === "24h") return d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
-  if (state.range === "7d")  return d.toLocaleString([], {weekday:"short", hour:"2-digit"});
-  return d.toLocaleDateString([], {month:"short", day:"numeric"});
+  const d = new Date(ms), span = RANGES[state.range].ms;
+  if (span <= 48*3600e3) return d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); // 12h/24h/48h → time
+  if (span <= 7*864e5)   return d.toLocaleString([], {weekday:"short", hour:"2-digit"});      // 7d → day + hour
+  return d.toLocaleString([], {month:"short", day:"numeric", hour:"2-digit"});                // 30d → date + hour
 }
 function tipTitle(items) {
   return new Date(items[0].parsed.x).toLocaleString([], {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"});
@@ -689,13 +689,25 @@ function tipTitle(items) {
 function tipLabel(ctx) {
   return `${ctx.dataset.label}: ${ctx.formattedValue}${ctx.dataset.unit ? " " + ctx.dataset.unit : ""}`;
 }
+// Toggling a measured series in the legend also toggles its "(forecast)" twin,
+// so the projection hides/shows with the measured line.
+function legendClick(e, item, legend) {
+  const ci = legend.chart;
+  Chart.defaults.plugins.legend.onClick.call(this, e, item, legend);
+  const vis = ci.isDatasetVisible(item.datasetIndex);
+  ci.data.datasets.forEach((ds, i) => {
+    if (ds.label === item.text + " (forecast)") ci.setDatasetVisibility(i, vis);
+  });
+  ci.update();
+}
 function baseOpts() {
   return {
     responsive:true, maintainAspectRatio:false,
     interaction:{ mode:"xband", intersect:false },
     plugins:{
       legend:{ labels:{ color:cssVar("--ink-dim"), font:{size:11}, usePointStyle:true,
-               filter:(item) => !/\(forecast\)/.test(item.text) } },
+               filter:(item) => !/\(forecast\)/.test(item.text) },
+               onClick:legendClick },
       tooltip:{
         backgroundColor:cssVar("--bg-bottom"), borderColor:cssVar("--accent"), borderWidth:1,
         titleColor:cssVar("--accent"), bodyColor:cssVar("--ink"),
@@ -930,7 +942,7 @@ function renderMain() {
   }
   c.options.plugins.legend.display = false;   // the title names the metric
   c.data.datasets = sets;
-  $("mainTitle").textContent = `${cfg.label} (${unit})`;
+  $("mainTitle").textContent = unit ? `${cfg.label} (${unit})` : cfg.label;
   c.update("none");
   if (state.tableView.mainChart) renderTable("mainChart");
 }
@@ -1062,10 +1074,35 @@ function pctCell(v, color) {
   const p = Math.max(0, Math.min(100, v));
   return `<td class="fc-pct" style="background:linear-gradient(90deg, ${color}55 ${p}%, transparent ${p}%)">${Math.round(v)}%</td>`;
 }
-function forecastTable(tiles, u) {
+// Detailed rows for the expanded table: every hour out to the range horizon
+// (12h/24h/48h), or every day (7d/30d, up to the ~7-day forecast horizon).
+function hourRow(p, idx) {
+  const when = new Date(p.ts);
+  return { idx, mode:"hour", when, hi:p.temp, lo:null, cond:p.condition,
+    windAvg:p.wind_avg, humidity:p.humidity, precipProb:p.precip_prob, cloud:p.cloud_pct, night:isNight(when) };
+}
+function expandedForecastRows() {
+  const f = state.forecast; if (!f || !f.pts.length) return [];
+  if (isDayRange()) {
+    const days = {};
+    for (const p of f.pts) (days[p.ts.slice(0,10)] ||= []).push(p);
+    return Object.values(days).slice(0, 7).map((seg, i) => buildTile(seg, i, "day"));
+  }
+  const now = Date.now(), horizon = now + RANGES[state.range].ms;
+  return f.pts
+    .filter(p => { const t = new Date(p.ts).getTime(); return t >= now - 3600e3 && t <= horizon; })
+    .map((p, i) => hourRow(p, i));
+}
+function fcRowWhen(t) {
+  if (t.idx === 0) return t.mode === "day" ? "Today" : "Now";
+  return t.mode === "day"
+    ? t.when.toLocaleDateString([], {weekday:"short", month:"short", day:"numeric"})
+    : t.when.toLocaleString([], {weekday:"short", hour:"numeric"});
+}
+function forecastTable(rows, u) {
   const head = `<tr><th>${isDayRange() ? "Day" : "Time"}</th><th class="fc-ico"></th>` +
     `<th>Temp</th><th>Wind</th><th>Humidity</th><th>Precip</th><th>Cloud</th></tr>`;
-  const rows = tiles.map(t => {
+  const body = rows.map(t => {
     const c = COND[t.cond] || { day:"⛅", night:"⛅", label:"—" };
     const ico = t.night ? c.night : c.day;
     const hi = t.hi == null ? "—" : `${Math.round(t.hi)}°`;
@@ -1073,7 +1110,7 @@ function forecastTable(tiles, u) {
     const wind = t.windAvg == null ? "—" : `${fmtNum(t.windAvg)} ${u.speed}`;
     const hum = t.humidity == null ? "—" : `${Math.round(t.humidity)}%`;
     return `<tr class="${t.idx === 0 ? "fc-now" : ""}">
-      <td class="fc-when">${tileWhen(t)}</td>
+      <td class="fc-when">${fcRowWhen(t)}</td>
       <td class="fc-ico" role="img" aria-label="${c.label}">${ico}</td>
       <td><span class="fc-hi">${hi}</span>${lo}</td>
       <td>${wind}</td>
@@ -1082,18 +1119,20 @@ function forecastTable(tiles, u) {
       ${pctCell(t.cloud, SERIES.cloud)}
     </tr>`;
   }).join("");
-  return `<table class="fc-table"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
+  return `<div class="fc-scroll"><table class="fc-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 function renderForecastTiles() {
   const f = state.forecast, wrap = $("forecastStrip");
   if (!f || !f.pts.length) { wrap.hidden = true; return; }
-  const tiles = isDayRange() ? dailySegments(f.pts) : hourlySegments(f.pts);
-  if (!tiles.length) { wrap.hidden = true; return; }
   const el = $("forecastTiles");
   if (state.forecastExpanded) {
+    const rows = expandedForecastRows();
+    if (!rows.length) { wrap.hidden = true; return; }
     el.className = "forecast-expanded";
-    el.innerHTML = forecastTable(tiles, f.units);
+    el.innerHTML = forecastTable(rows, f.units);
   } else {
+    const tiles = isDayRange() ? dailySegments(f.pts) : hourlySegments(f.pts);
+    if (!tiles.length) { wrap.hidden = true; return; }
     el.className = "forecast-strip";
     el.innerHTML = tiles.map(t => forecastTile(t, f.units)).join("");
   }
